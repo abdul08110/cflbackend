@@ -46,8 +46,7 @@ public class FixtureSyncService {
         JsonNode root = sportMonksCricketClient.getUpcomingFixtures(
                 iplLeagueId,
                 from.toString(),
-                to.toString()
-        );
+                to.toString());
 
         JsonNode data = root.path("data");
         if (!data.isArray()) {
@@ -77,8 +76,7 @@ public class FixtureSyncService {
         List<Fixture> fixtures = fixtureRepository
                 .findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(
                         cricketSportId,
-                        LocalDateTime.now()
-                );
+                        LocalDateTime.now(ZoneId.of("Asia/Kolkata")));
 
         List<FixtureSummaryResponse> response = new ArrayList<>();
 
@@ -117,8 +115,8 @@ public class FixtureSyncService {
     }
 
     private List<FixtureParticipantResponse> mapParticipants(Long fixtureId) {
-        List<FixtureParticipant> participants =
-                fixtureParticipantRepository.findByFixtureIdOrderByIsHomeDescTeamNameAsc(fixtureId);
+        List<FixtureParticipant> participants = fixtureParticipantRepository
+                .findByFixtureIdOrderByIsHomeDescTeamNameAsc(fixtureId);
 
         List<FixtureParticipantResponse> response = new ArrayList<>();
         for (FixtureParticipant p : participants) {
@@ -222,7 +220,8 @@ public class FixtureSyncService {
 
     private Long longValue(JsonNode node, String field) {
         JsonNode value = node.get(field);
-        if (value == null || value.isNull()) return null;
+        if (value == null || value.isNull())
+            return null;
         return value.asLong();
     }
 

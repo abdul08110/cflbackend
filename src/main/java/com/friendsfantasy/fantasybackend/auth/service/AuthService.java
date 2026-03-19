@@ -47,16 +47,21 @@ public class AuthService {
             throw new RuntimeException("Mobile already registered");
         }
 
-        if (!otpService.isOtpVerified(request.getMobile(), OtpRequest.Purpose.REGISTER)) {
-            throw new RuntimeException("Mobile OTP not verified");
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new RuntimeException("Email already registered");
+        }
+
+        if (!otpService.isOtpVerified(request.getEmail(), OtpRequest.Purpose.REGISTER)) {
+            throw new RuntimeException("Email OTP not verified");
         }
 
         User user = User.builder()
                 .username(request.getUsername())
                 .mobile(request.getMobile())
+                .email(request.getEmail())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .status(User.Status.ACTIVE)
-                .mobileVerified(true)
+                .mobileVerified(false)
                 .biometricEnabled(false)
                 .lastLoginAt(LocalDateTime.now())
                 .build();
@@ -64,14 +69,16 @@ public class AuthService {
         user = userRepository.save(user);
 
         UserProfile profile = UserProfile.builder()
-                .userId(user.getId())
                 .user(user)
                 .fullName(request.getFullName())
+                .email(request.getEmail())
                 .build();
 
         userProfileRepository.save(profile);
+
         walletService.createWalletIfNotExists(user.getId());
         userStatsService.createIfMissing(user.getId());
+
         return user;
     }
 
@@ -97,8 +104,7 @@ public class AuthService {
                 user.getUsername(),
                 user.getMobile(),
                 user.getPasswordHash(),
-                true
-        );
+                true);
 
         String accessToken = jwtService.generateAccessToken(principal);
         String refreshToken = jwtService.generateRefreshToken(principal);
@@ -166,8 +172,7 @@ public class AuthService {
                 user.getUsername(),
                 user.getMobile(),
                 user.getPasswordHash(),
-                true
-        );
+                true);
 
         String newAccessToken = jwtService.generateAccessToken(principal);
         String newRefreshToken = jwtService.generateRefreshToken(principal);

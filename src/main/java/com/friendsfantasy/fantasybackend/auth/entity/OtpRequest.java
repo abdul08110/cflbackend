@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 public class OtpRequest {
 
     public enum Purpose {
-        REGISTER, LOGIN, RESET_PASSWORD, CHANGE_PASSWORD, VERIFY_MOBILE
+        REGISTER, LOGIN, RESET_PASSWORD, CHANGE_PASSWORD, VERIFY_EMAIL
     }
 
     public enum Status {
@@ -28,6 +28,9 @@ public class OtpRequest {
 
     @Column(nullable = false, length = 20)
     private String mobile;
+    
+    @Column(nullable = false, length = 150)
+    private String email;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
