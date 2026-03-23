@@ -11,8 +11,11 @@ import java.util.List;
 public class FixtureSummaryResponse {
     private Long fixtureId;
     private Long externalFixtureId;
+    private Long externalLeagueId;
     private String title;
     private String status;
+    private String league;
+    private String venue;
     private LocalDateTime startTime;
     private LocalDateTime deadlineTime;
     private List<FixtureParticipantResponse> participants;

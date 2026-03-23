@@ -19,7 +19,7 @@ public class FixtureController {
     @GetMapping("/cricket/fixtures/upcoming")
     public ApiResponse<List<FixtureSummaryResponse>> getUpcomingFixtures() {
         return ApiResponse.ok(
-                "Upcoming IPL fixtures fetched successfully",
+                "Upcoming cricket fixtures fetched successfully",
                 fixtureSyncService.getUpcomingFixtures()
         );
     }

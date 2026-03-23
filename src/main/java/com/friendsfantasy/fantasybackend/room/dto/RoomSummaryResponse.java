@@ -1,18 +1,37 @@
 package com.friendsfantasy.fantasybackend.room.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
+
+import java.time.LocalDateTime;
 
 @Data
 @Builder
 public class RoomSummaryResponse {
-    private Long roomId;
+    private Long communityId;
+    private Long contestId;
+    private Long fixtureId;
     private Long sportId;
-    private String roomName;
-    private String roomCode;
+    @JsonProperty("createdBy")
+    private Long createdByUserId;
+    private String communityName;
+    private String communityCode;
     private Boolean isPrivate;
-    private Integer maxMembers;
-    private Long memberCount;
+    private Integer maxSpots;
+    private Long joinedMembers;
+    private Integer joiningPoints;
+    private Integer prizePoolPoints;
+    private Integer winnerPayoutPoints;
     private String myRole;
     private String status;
+    private String contestStatus;
+    private String fixtureStatus;
+    private String fixtureTitle;
+    private LocalDateTime fixtureStartTime;
+    private LocalDateTime fixtureDeadlineTime;
+    private Boolean teamCreated;
+    private Boolean canCreateTeam;
+    private Boolean canInvite;
+    private Boolean canViewParticipantTeams;
 }

@@ -4,22 +4,15 @@ import com.friendsfantasy.fantasybackend.auth.dto.*;
 import com.friendsfantasy.fantasybackend.auth.entity.User;
 import com.friendsfantasy.fantasybackend.auth.service.AuthService;
 import com.friendsfantasy.fantasybackend.auth.service.OtpService;
-import com.friendsfantasy.fantasybackend.auth.repository.OtpRequestRepository;
 import com.friendsfantasy.fantasybackend.common.ApiResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
-@CrossOrigin(originPatterns = { "http://localhost:*", "http://127.0.0.1:*" }, allowedHeaders = "*", methods = {
-        RequestMethod.GET,
-        RequestMethod.POST,
-        RequestMethod.PUT,
-        RequestMethod.DELETE,
-        RequestMethod.PATCH,
-        RequestMethod.OPTIONS
-})
 @RestController
 @RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
@@ -27,7 +20,9 @@ public class AuthController {
 
     private final OtpService otpService;
     private final AuthService authService;
-    private final OtpRequestRepository otpRequestRepository;
+
+    @Value("${app.otp.expose-in-response:false}")
+    private boolean exposeOtpInResponse;
 
     @GetMapping("/ping")
     public Map<String, Object> ping() {
@@ -39,13 +34,17 @@ public class AuthController {
 
     @PostMapping("/send-otp")
     public ApiResponse<Map<String, Object>> sendOtp(@Valid @RequestBody SendOtpRequest request) {
-        String otp = otpService.sendOtp(request.getMobile(),request.getEmail(), request.getPurpose());
+        String otp = otpService.sendOtp(request.getMobile(), request.getEmail(), request.getPurpose());
 
-        return ApiResponse.ok("OTP sent successfully", Map.of(
-                "mobile", request.getMobile(),
-                "email", request.getEmail(),
-                "purpose", request.getPurpose(),
-                "devOtp", otp));
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("mobile", request.getMobile());
+        response.put("email", request.getEmail());
+        response.put("purpose", request.getPurpose());
+        if (exposeOtpInResponse) {
+            response.put("devOtp", otp);
+        }
+
+        return ApiResponse.ok("OTP sent successfully", response);
     }
 
     @PostMapping("/verify-otp")

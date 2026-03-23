@@ -25,6 +25,9 @@ public class Room {
     @Column(name = "sport_id", nullable = false)
     private Long sportId;
 
+    @Column(name = "fixture_id")
+    private Long fixtureId;
+
     @Column(name = "created_by_user_id", nullable = false)
     private Long createdByUserId;
 
@@ -38,7 +41,7 @@ public class Room {
     private Boolean isPrivate = true;
 
     @Column(name = "max_members", nullable = false)
-    private Integer maxMembers = 25;
+    private Integer maxMembers = 20;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

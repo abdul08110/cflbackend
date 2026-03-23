@@ -35,6 +35,8 @@ public class SecurityConfig {
                                 "/api/v1/auth/logout",
                                 "/error"
                         ).permitAll()
+                        .requestMatchers("/api/v1/admin/auth/login").permitAll()
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

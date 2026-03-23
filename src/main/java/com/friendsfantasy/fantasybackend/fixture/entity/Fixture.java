@@ -48,6 +48,9 @@ public class Fixture {
     @Column(name = "last_synced_at")
     private LocalDateTime lastSyncedAt;
 
+    @Column(name = "last_score_synced_at")
+    private LocalDateTime lastScoreSyncedAt;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 

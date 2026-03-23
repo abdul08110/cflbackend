@@ -1,5 +1,6 @@
 package com.friendsfantasy.fantasybackend.auth.service;
 
+import com.friendsfantasy.fantasybackend.common.ApiException;
 import com.friendsfantasy.fantasybackend.auth.dto.*;
 import com.friendsfantasy.fantasybackend.auth.entity.OtpRequest;
 import com.friendsfantasy.fantasybackend.auth.entity.User;
@@ -40,19 +41,19 @@ public class AuthService {
     @Transactional
     public User register(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getUsername())) {
-            throw new RuntimeException("Username already exists");
+            throw ApiException.conflict("Username already exists");
         }
 
         if (userRepository.existsByMobile(request.getMobile())) {
-            throw new RuntimeException("Mobile already registered");
+            throw ApiException.conflict("Mobile already registered");
         }
 
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already registered");
+            throw ApiException.conflict("Email already registered");
         }
 
         if (!otpService.isOtpVerified(request.getEmail(), OtpRequest.Purpose.REGISTER)) {
-            throw new RuntimeException("Email OTP not verified");
+            throw ApiException.badRequest("Email OTP not verified");
         }
 
         User user = User.builder()
@@ -86,14 +87,14 @@ public class AuthService {
     public AuthResponse login(LoginRequest request) {
         User user = userRepository.findByMobile(request.getMobileOrUsername())
                 .or(() -> userRepository.findByUsername(request.getMobileOrUsername()))
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> ApiException.unauthorized("Invalid credentials"));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new RuntimeException("Invalid password");
+            throw ApiException.unauthorized("Invalid credentials");
         }
 
         if (user.getStatus() != User.Status.ACTIVE) {
-            throw new RuntimeException("User account is not active");
+            throw ApiException.forbidden("User account is not active");
         }
 
         user.setLastLoginAt(LocalDateTime.now());
@@ -148,23 +149,23 @@ public class AuthService {
 
         String tokenType = jwtService.extractType(refreshToken);
         if (!"refresh".equals(tokenType)) {
-            throw new RuntimeException("Invalid refresh token");
+            throw ApiException.unauthorized("Invalid refresh token");
         }
 
         String refreshHash = tokenHashUtil.sha256(refreshToken);
 
         UserSession session = userSessionRepository.findByRefreshTokenHashAndRevokedAtIsNull(refreshHash)
-                .orElseThrow(() -> new RuntimeException("Refresh session not found"));
+                .orElseThrow(() -> ApiException.unauthorized("Refresh session not found"));
 
         if (session.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("Refresh token expired");
+            throw ApiException.unauthorized("Refresh token expired");
         }
 
         User user = userRepository.findById(session.getUserId())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> ApiException.unauthorized("User not found"));
 
         if (user.getStatus() != User.Status.ACTIVE) {
-            throw new RuntimeException("User account is not active");
+            throw ApiException.forbidden("User account is not active");
         }
 
         UserPrincipal principal = new UserPrincipal(
@@ -196,7 +197,7 @@ public class AuthService {
         String refreshHash = tokenHashUtil.sha256(request.getRefreshToken());
 
         UserSession session = userSessionRepository.findByRefreshTokenHashAndRevokedAtIsNull(refreshHash)
-                .orElseThrow(() -> new RuntimeException("Session not found"));
+                .orElseThrow(() -> ApiException.unauthorized("Session not found"));
 
         session.setRevokedAt(LocalDateTime.now());
         userSessionRepository.save(session);
@@ -204,11 +205,11 @@ public class AuthService {
 
     public User getById(Long userId) {
         return userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> ApiException.notFound("User not found"));
     }
 
     public User getByUsername(String username) {
         return userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> ApiException.notFound("User not found"));
     }
 }

@@ -24,7 +24,7 @@ public class ContestService {
     private final FixtureRepository fixtureRepository;
 
     @Transactional
-    public ContestResponse createContest(Long fixtureId, CreateContestRequest request, Long adminId) {
+    public ContestResponse createContest(Long fixtureId, CreateContestRequest request) {
         Fixture fixture = fixtureRepository.findById(fixtureId)
                 .orElseThrow(() -> new RuntimeException("Fixture not found"));
 
@@ -38,8 +38,10 @@ public class ContestService {
 
         Contest contest = Contest.builder()
                 .fixtureId(fixture.getId())
+                .roomId(null)
                 .scoringTemplateId(request.getScoringTemplateId())
                 .contestName(request.getContestName().trim())
+                .contestType(Contest.ContestType.PUBLIC)
                 .entryFeePoints(request.getEntryFeePoints())
                 .prizePoolPoints(request.getPrizePoolPoints())
                 .winnerCount(request.getWinnerCount())
@@ -48,7 +50,7 @@ public class ContestService {
                 .joinConfirmRequired(Boolean.TRUE.equals(request.getJoinConfirmRequired()))
                 .firstPrizePoints(firstPrize)
                 .status(Contest.Status.OPEN)
-                .createdByAdminId(adminId)
+                .createdByUserId(null)
                 .build();
 
         contest = contestRepository.save(contest);
@@ -62,6 +64,10 @@ public class ContestService {
     public ContestResponse updateContest(Long contestId, CreateContestRequest request) {
         Contest contest = contestRepository.findById(contestId)
                 .orElseThrow(() -> new RuntimeException("Contest not found"));
+
+        if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
+            throw new RuntimeException("Community contests cannot be updated from admin");
+        }
 
         validateContestRequest(request);
 
@@ -100,7 +106,10 @@ public class ContestService {
         fixtureRepository.findById(fixtureId)
                 .orElseThrow(() -> new RuntimeException("Fixture not found"));
 
-        List<Contest> contests = contestRepository.findByFixtureIdOrderByEntryFeePointsAscIdAsc(fixtureId);
+        List<Contest> contests = contestRepository.findByFixtureIdAndContestTypeOrderByEntryFeePointsAscIdAsc(
+                fixtureId,
+                Contest.ContestType.PUBLIC
+        );
         List<ContestResponse> response = new ArrayList<>();
 
         for (Contest contest : contests) {
@@ -118,21 +127,33 @@ public class ContestService {
     }
 
     private ContestResponse mapContest(Contest contest) {
-        List<ContestPrizeResponse> prizes = contestPrizeRepository.findByContestIdOrderByRankFromNoAsc(contest.getId())
-                .stream()
-                .map(p -> ContestPrizeResponse.builder()
-                        .rankFrom(p.getRankFromNo())
-                        .rankTo(p.getRankToNo())
-                        .prizePoints(p.getPrizePoints())
-                        .build())
-                .toList();
+        List<ContestPrizeResponse> prizes;
+
+        if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
+            prizes = List.of(ContestPrizeResponse.builder()
+                    .rankFrom(1)
+                    .rankTo(1)
+                    .prizePoints(contest.getFirstPrizePoints())
+                    .build());
+        } else {
+            prizes = contestPrizeRepository.findByContestIdOrderByRankFromNoAsc(contest.getId())
+                    .stream()
+                    .map(p -> ContestPrizeResponse.builder()
+                            .rankFrom(p.getRankFromNo())
+                            .rankTo(p.getRankToNo())
+                            .prizePoints(p.getPrizePoints())
+                            .build())
+                    .toList();
+        }
 
         int spotsLeft = Math.max(0, contest.getMaxSpots() - contest.getSpotsFilled());
 
         return ContestResponse.builder()
                 .contestId(contest.getId())
+                .communityId(contest.getRoomId())
                 .fixtureId(contest.getFixtureId())
                 .contestName(contest.getContestName())
+                .contestType(contest.getContestType().name())
                 .maxSpots(contest.getMaxSpots())
                 .spotsFilled(contest.getSpotsFilled())
                 .spotsLeft(spotsLeft)

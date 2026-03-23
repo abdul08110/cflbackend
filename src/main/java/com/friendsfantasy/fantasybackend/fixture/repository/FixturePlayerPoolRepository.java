@@ -8,6 +8,7 @@ import java.util.Optional;
 
 public interface FixturePlayerPoolRepository extends JpaRepository<FixturePlayerPool, Long> {
     List<FixturePlayerPool> findByFixtureIdAndIsActiveTrueOrderByExternalTeamIdAscRoleCodeAscIdAsc(Long fixtureId);
+    List<FixturePlayerPool> findByFixtureIdOrderByIdAsc(Long fixtureId);
     Optional<FixturePlayerPool> findByFixtureIdAndPlayerId(Long fixtureId, Long playerId);
     void deleteByFixtureId(Long fixtureId);
 }

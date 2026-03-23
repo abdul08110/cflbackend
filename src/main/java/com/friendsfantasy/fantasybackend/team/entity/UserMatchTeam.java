@@ -38,6 +38,7 @@ public class UserMatchTeam {
     private BigDecimal totalCredits;
 
     @Column(name = "is_locked", nullable = false)
+    @Builder.Default
     private Boolean isLocked = false;
 
     @Column(name = "locked_at")

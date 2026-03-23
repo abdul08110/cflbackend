@@ -4,6 +4,7 @@ import com.friendsfantasy.fantasybackend.auth.entity.OtpRequest;
 import com.friendsfantasy.fantasybackend.auth.repository.OtpRequestRepository;
 import com.friendsfantasy.fantasybackend.auth.repository.UserProfileRepository;
 import com.friendsfantasy.fantasybackend.auth.repository.UserRepository;
+import com.friendsfantasy.fantasybackend.common.ApiException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
@@ -23,10 +24,10 @@ public class OtpService {
     private final UserRepository userRepository;
     private final JavaMailSender mailSender;
 
-    @Value("${app.otp.fixed-enabled:true}")
+    @Value("${app.otp.fixed-enabled:false}")
     private boolean fixedOtpEnabled;
 
-    @Value("${app.otp.fixed-value:081181}")
+    @Value("${app.otp.fixed-value:}")
     private String fixedOtpValue;
 
     @Value("${app.otp.expiry-minutes:5}")
@@ -44,10 +45,10 @@ public class OtpService {
         OtpRequest.Purpose purpose = parsePurpose(purposeText);
 
         if (purpose == OtpRequest.Purpose.REGISTER && userProfileRepository.existsByEmail(email)) {
-            throw new RuntimeException("Email already registered");
+            throw ApiException.conflict("Email already registered");
         }
         if (userRepository.existsByMobile(mobile)) {
-            throw new RuntimeException("Mobile already registered");
+            throw ApiException.conflict("Mobile already registered");
         }
         long resendCount = otpRequestRepository.countByEmailAndPurposeAndCreatedAtAfter(
                 email,
@@ -55,7 +56,7 @@ public class OtpService {
                 LocalDateTime.now().minusHours(24));
 
         if (resendCount >= MAX_RESEND_IN_24_HOURS) {
-            throw new RuntimeException("OTP resend limit exceeded. Contact admin.");
+            throw ApiException.tooManyRequests("OTP resend limit exceeded. Contact admin.");
         }
 
         String otp = fixedOtpEnabled
@@ -86,21 +87,21 @@ public class OtpService {
         OtpRequest request = otpRequestRepository
                 .findTopByEmailAndPurposeAndStatusOrderByCreatedAtDesc(
                         email, purpose, OtpRequest.Status.PENDING)
-                .orElseThrow(() -> new RuntimeException("OTP not found"));
+                .orElseThrow(() -> ApiException.badRequest("OTP not found"));
 
         if (!request.getMobile().equals(mobile)) {
-            throw new RuntimeException("Mobile mismatch");
+            throw ApiException.badRequest("Mobile mismatch");
         }
         if (request.getExpiresAt().isBefore(LocalDateTime.now())) {
             request.setStatus(OtpRequest.Status.EXPIRED);
             otpRequestRepository.save(request);
-            throw new RuntimeException("OTP expired");
+            throw ApiException.badRequest("OTP expired");
         }
 
         if (request.getAttemptCount() >= MAX_VERIFY_ATTEMPTS) {
             request.setStatus(OtpRequest.Status.FAILED);
             otpRequestRepository.save(request);
-            throw new RuntimeException("Too many wrong OTP attempts");
+            throw ApiException.tooManyRequests("Too many wrong OTP attempts");
         }
 
         if (!request.getOtpCode().equals(otp)) {
@@ -111,7 +112,7 @@ public class OtpService {
             }
 
             otpRequestRepository.save(request);
-            throw new RuntimeException("Invalid OTP");
+            throw ApiException.badRequest("Invalid OTP");
         }
 
         request.setStatus(OtpRequest.Status.VERIFIED);
@@ -132,7 +133,7 @@ public class OtpService {
         try {
             return OtpRequest.Purpose.valueOf(purposeText.trim().toUpperCase());
         } catch (Exception e) {
-            throw new RuntimeException("Invalid OTP purpose");
+            throw ApiException.badRequest("Invalid OTP purpose");
         }
     }
 
@@ -145,7 +146,7 @@ public class OtpService {
             message.setText(buildBody(otp, purpose));
             mailSender.send(message);
         } catch (MailException e) {
-            throw new RuntimeException("Failed to send OTP email");
+            throw ApiException.serviceUnavailable("Failed to send OTP email");
         }
     }
 

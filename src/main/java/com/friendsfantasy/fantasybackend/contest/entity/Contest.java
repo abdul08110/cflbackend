@@ -15,7 +15,8 @@ import java.time.LocalDateTime;
 public class Contest {
 
     public enum ContestType {
-        PUBLIC
+        PUBLIC,
+        COMMUNITY
     }
 
     public enum Status {
@@ -28,6 +29,9 @@ public class Contest {
 
     @Column(name = "fixture_id", nullable = false)
     private Long fixtureId;
+
+    @Column(name = "room_id")
+    private Long roomId;
 
     @Column(name = "scoring_template_id", nullable = false)
     private Long scoringTemplateId;
@@ -64,8 +68,8 @@ public class Contest {
     @Column(nullable = false, length = 20)
     private Status status = Status.DRAFT;
 
-    @Column(name = "created_by_admin_id", nullable = false)
-    private Long createdByAdminId;
+    @Column(name = "created_by_user_id")
+    private Long createdByUserId;
 
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;

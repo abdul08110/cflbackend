@@ -13,5 +13,6 @@ public class RoomMemberResponse {
     private String mobile;
     private String role;
     private String status;
+    private Boolean teamCreated;
     private LocalDateTime joinedAt;
 }

@@ -35,15 +35,19 @@ public class FixturePlayerPool {
     private BigDecimal creditValue;
 
     @Column(name = "is_announced", nullable = false)
+    @Builder.Default
     private Boolean isAnnounced = false;
 
     @Column(name = "is_playing", nullable = false)
+    @Builder.Default
     private Boolean isPlaying = false;
 
     @Column(name = "is_active", nullable = false)
+    @Builder.Default
     private Boolean isActive = true;
 
     @Column(name = "selection_percent", nullable = false, precision = 5, scale = 2)
+    @Builder.Default
     private BigDecimal selectionPercent = BigDecimal.ZERO;
 
     @Column(name = "created_at", insertable = false, updatable = false)

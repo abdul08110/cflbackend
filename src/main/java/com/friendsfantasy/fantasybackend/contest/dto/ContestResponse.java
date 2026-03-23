@@ -9,8 +9,10 @@ import java.util.List;
 @Builder
 public class ContestResponse {
     private Long contestId;
+    private Long communityId;
     private Long fixtureId;
     private String contestName;
+    private String contestType;
     private Integer maxSpots;
     private Integer spotsFilled;
     private Integer spotsLeft;

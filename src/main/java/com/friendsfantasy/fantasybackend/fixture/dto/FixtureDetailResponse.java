@@ -15,7 +15,12 @@ public class FixtureDetailResponse {
     private Long externalSeasonId;
     private String title;
     private String status;
+    private String format;
+    private String note;
+    private String league;
+    private String venue;
     private LocalDateTime startTime;
     private LocalDateTime deadlineTime;
+    private FixtureLiveDataResponse fixtureLiveData;
     private List<FixtureParticipantResponse> participants;
 }

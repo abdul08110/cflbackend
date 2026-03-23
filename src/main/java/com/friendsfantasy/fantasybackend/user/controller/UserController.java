@@ -4,7 +4,7 @@ import com.friendsfantasy.fantasybackend.auth.entity.User;
 import com.friendsfantasy.fantasybackend.auth.service.AuthService;
 import com.friendsfantasy.fantasybackend.common.ApiResponse;
 import com.friendsfantasy.fantasybackend.security.UserPrincipal;
-import com.friendsfantasy.fantasybackend.wallet.entity.WalletAccount;
+import com.friendsfantasy.fantasybackend.wallet.dto.WalletSummaryResponse;
 import com.friendsfantasy.fantasybackend.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -35,7 +35,7 @@ public class UserController {
     }
 
     @GetMapping("/me/wallet")
-    public ApiResponse<WalletAccount> getMyWallet(@AuthenticationPrincipal UserPrincipal principal) {
-        return ApiResponse.ok("Wallet fetched successfully", walletService.getWallet(principal.getId()));
+    public ApiResponse<WalletSummaryResponse> getMyWallet(@AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok("Wallet fetched successfully", walletService.getWalletSummary(principal.getId()));
     }
 }

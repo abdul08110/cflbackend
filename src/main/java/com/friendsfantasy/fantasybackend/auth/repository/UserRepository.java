@@ -3,6 +3,7 @@ package com.friendsfantasy.fantasybackend.auth.repository;
 import com.friendsfantasy.fantasybackend.auth.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.domain.Pageable;
 
 import java.util.List;
 import java.util.Optional;
@@ -28,4 +29,16 @@ public interface UserRepository extends JpaRepository<User, Long> {
             order by u.username asc
             """)
     List<User> searchActiveUsers(String query, Long currentUserId);
+
+    @Query("""
+            select u
+            from User u
+            where (:query = ''
+                or lower(u.username) like lower(concat('%', :query, '%'))
+                or u.mobile like concat('%', :query, '%')
+                or lower(u.email) like lower(concat('%', :query, '%'))
+            )
+            order by u.createdAt desc, u.id desc
+            """)
+    List<User> searchForAdmin(String query, Pageable pageable);
 }

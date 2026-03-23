@@ -10,6 +10,7 @@ import java.util.Optional;
 public interface FixtureRepository extends JpaRepository<Fixture, Long> {
 
     Optional<Fixture> findBySportIdAndExternalFixtureId(Long sportId, Long externalFixtureId);
-
+    Optional<Fixture> findByExternalFixtureId(Long externalFixtureId);
     List<Fixture> findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(Long sportId, LocalDateTime now);
+    List<Fixture> findBySportIdAndDeadlineTimeGreaterThanOrderByStartTimeAsc(Long sportId, LocalDateTime now);
 }

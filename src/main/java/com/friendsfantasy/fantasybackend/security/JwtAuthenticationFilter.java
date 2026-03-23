@@ -6,12 +6,14 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -41,25 +43,50 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 return;
             }
 
+            String principalType = jwtService.extractPrincipalType(token);
             String username = jwtService.extractUsername(token);
 
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-                UserPrincipal userPrincipal =
-                        (UserPrincipal) customUserDetailsService.loadByUsernameOnly(username);
 
-                if (jwtService.isTokenValid(token, userPrincipal, "access")) {
-                    UsernamePasswordAuthenticationToken authentication =
-                            new UsernamePasswordAuthenticationToken(
-                                    userPrincipal,
-                                    null,
-                                    userPrincipal.getAuthorities()
-                            );
+                // ADMIN TOKEN
+                if ("ADMIN".equalsIgnoreCase(principalType)) {
+                    Long adminId = jwtService.extractAdminId(token);
 
-                    authentication.setDetails(
-                            new WebAuthenticationDetailsSource().buildDetails(request)
-                    );
+                    if (adminId != null && jwtService.isAdminTokenValid(token, "access")) {
+                        AdminPrincipal adminPrincipal = new AdminPrincipal(adminId, username);
+                        UsernamePasswordAuthenticationToken authentication =
+                                new UsernamePasswordAuthenticationToken(
+                                        adminPrincipal,
+                                        null,
+                                        List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))
+                                );
 
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                        authentication.setDetails(
+                                new WebAuthenticationDetailsSource().buildDetails(request)
+                        );
+
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                    }
+                } else {
+                    // NORMAL USER TOKEN
+                    UserPrincipal userPrincipal =
+                            (UserPrincipal) customUserDetailsService.loadByUsernameOnly(username);
+
+                    if (userPrincipal.isEnabled()
+                            && jwtService.isTokenValid(token, userPrincipal, "access")) {
+                        UsernamePasswordAuthenticationToken authentication =
+                                new UsernamePasswordAuthenticationToken(
+                                        userPrincipal,
+                                        null,
+                                        userPrincipal.getAuthorities()
+                                );
+
+                        authentication.setDetails(
+                                new WebAuthenticationDetailsSource().buildDetails(request)
+                        );
+
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                    }
                 }
             }
         } catch (Exception ignored) {

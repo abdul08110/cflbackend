@@ -10,11 +10,19 @@ public interface ContestEntryRepository extends JpaRepository<ContestEntry, Long
 
     boolean existsByContestIdAndUserMatchTeamId(Long contestId, Long userMatchTeamId);
 
+    boolean existsByContestIdAndUserId(Long contestId, Long userId);
+
     List<ContestEntry> findByContestIdAndUserIdOrderByJoinedAtAsc(Long contestId, Long userId);
+
+    Optional<ContestEntry> findByContestIdAndUserId(Long contestId, Long userId);
+
+    Optional<ContestEntry> findByContestIdAndUserMatchTeamId(Long contestId, Long userMatchTeamId);
 
     List<ContestEntry> findByContestIdOrderByJoinedAtAsc(Long contestId);
 
     Optional<ContestEntry> findByIdAndContestId(Long entryId, Long contestId);
+
+    List<ContestEntry> findByContestIdInOrderByContestIdAscJoinedAtAsc(List<Long> contestIds);
 
     List<ContestEntry> findByUserIdOrderByJoinedAtDesc(Long userId);
 

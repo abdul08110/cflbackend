@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface UserMatchTeamPlayerRepository extends JpaRepository<UserMatchTeamPlayer, Long> {
-    List<UserMatchTeamPlayer> findByUserMatchTeamIdOrderByIdAsc(Long userMatchTeamId);
+    List<UserMatchTeamPlayer> findByUserMatchTeamIdOrderByIsSubstituteAscSubstitutePriorityAscIdAsc(Long userMatchTeamId);
+    List<UserMatchTeamPlayer> findByUserMatchTeamIdInOrderByUserMatchTeamIdAscIsSubstituteAscSubstitutePriorityAscIdAsc(List<Long> userMatchTeamIds);
     void deleteByUserMatchTeamId(Long userMatchTeamId);
 }

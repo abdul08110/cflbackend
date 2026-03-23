@@ -13,7 +13,7 @@ public class ContestEntryResponse {
     private Long contestId;
     private Long teamId;
     private String teamName;
-    private Long roomId;
+    private Long communityId;
     private Integer entryFeePoints;
     private BigDecimal fantasyPoints;
     private Integer rankNo;

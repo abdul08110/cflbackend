@@ -33,7 +33,7 @@ public class ContestEntry {
     @Column(name = "room_id")
     private Long roomId;
 
-    @Column(name = "user_match_team_id", nullable = false)
+    @Column(name = "user_match_team_id", nullable = true)
     private Long userMatchTeamId;
 
     @Column(name = "wallet_transaction_id", nullable = false)

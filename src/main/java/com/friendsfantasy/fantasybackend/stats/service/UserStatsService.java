@@ -60,6 +60,17 @@ public class UserStatsService {
                 .orElseThrow(() -> new RuntimeException("User stats not found"));
     }
 
+    @Transactional
+    public void recordCommunityCreated(Long userId) {
+        createIfMissing(userId);
+
+        UserStats stats = userStatsRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User stats not found"));
+
+        stats.setTotalRoomsCreated(stats.getTotalRoomsCreated() + 1);
+        userStatsRepository.save(stats);
+    }
+
     private void recalculateWinRate(UserStats stats) {
         if (stats.getTotalContestsJoined() == 0) {
             stats.setWinRate(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));

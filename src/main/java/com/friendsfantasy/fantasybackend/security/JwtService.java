@@ -6,6 +6,8 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import com.friendsfantasy.fantasybackend.admin.auth.entity.AdminUser;
+
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -29,7 +31,16 @@ public class JwtService {
 
     @PostConstruct
     public void init() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT secret is missing. Configure jwt.secret or JWT_SECRET before starting the application");
+        }
+
         byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        if (keyBytes.length < 32) {
+            throw new IllegalStateException("JWT secret must be at least 32 bytes long");
+        }
+
         this.secretKey = Keys.hmacShaKeyFor(keyBytes);
     }
 
@@ -41,7 +52,9 @@ public class JwtService {
                 .claims(Map.of(
                         "userId", userPrincipal.getId(),
                         "mobile", userPrincipal.getMobile(),
-                        "type", "access"
+                        "type", "access",
+                        "principalType", "USER",
+                        "role", "USER"
                 ))
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTokenExpiryMinutes, ChronoUnit.MINUTES)))
@@ -57,10 +70,29 @@ public class JwtService {
                 .claims(Map.of(
                         "userId", userPrincipal.getId(),
                         "mobile", userPrincipal.getMobile(),
-                        "type", "refresh"
+                        "type", "refresh",
+                        "principalType", "USER",
+                        "role", "USER"
                 ))
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(refreshTokenExpiryDays, ChronoUnit.DAYS)))
+                .signWith(secretKey)
+                .compact();
+    }
+
+    public String generateAdminAccessToken(AdminUser user) {
+        Instant now = Instant.now();
+
+        return Jwts.builder()
+                .subject(user.getUsername())
+                .claims(Map.of(
+                        "adminId", user.getId(),
+                        "role", "ADMIN",
+                        "principalType", "ADMIN",
+                        "type", "access"
+                ))
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(accessTokenExpiryMinutes, ChronoUnit.MINUTES)))
                 .signWith(secretKey)
                 .compact();
     }
@@ -71,13 +103,33 @@ public class JwtService {
 
     public Long extractUserId(String token) {
         Object value = extractAllClaims(token).get("userId");
+        if (value == null) return null;
+        if (value instanceof Integer i) return i.longValue();
+        if (value instanceof Long l) return l;
+        return Long.valueOf(String.valueOf(value));
+    }
+
+    public Long extractAdminId(String token) {
+        Object value = extractAllClaims(token).get("adminId");
+        if (value == null) return null;
         if (value instanceof Integer i) return i.longValue();
         if (value instanceof Long l) return l;
         return Long.valueOf(String.valueOf(value));
     }
 
     public String extractType(String token) {
-        return String.valueOf(extractAllClaims(token).get("type"));
+        Object value = extractAllClaims(token).get("type");
+        return value == null ? null : String.valueOf(value);
+    }
+
+    public String extractPrincipalType(String token) {
+        Object value = extractAllClaims(token).get("principalType");
+        return value == null ? null : String.valueOf(value);
+    }
+
+    public String extractRole(String token) {
+        Object value = extractAllClaims(token).get("role");
+        return value == null ? null : String.valueOf(value);
     }
 
     public Date extractExpiration(String token) {
@@ -88,8 +140,22 @@ public class JwtService {
         String username = extractUsername(token);
         String type = extractType(token);
 
-        return username.equals(userPrincipal.getUsername())
+        return username != null
+                && username.equals(userPrincipal.getUsername())
                 && expectedType.equals(type)
+                && !isTokenExpired(token);
+    }
+
+    public boolean isAdminTokenValid(String token, String expectedType) {
+        String username = extractUsername(token);
+        String type = extractType(token);
+        String principalType = extractPrincipalType(token);
+        String role = extractRole(token);
+
+        return username != null
+                && expectedType.equals(type)
+                && "ADMIN".equalsIgnoreCase(principalType)
+                && "ADMIN".equalsIgnoreCase(role)
                 && !isTokenExpired(token);
     }
 

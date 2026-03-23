@@ -17,6 +17,9 @@ public class CreateTeamRequest {
     @NotNull
     private List<SelectedTeamPlayerRequest> players;
 
+    @Valid
+    private List<SelectedTeamPlayerRequest> substitutes;
+
     @NotNull
     private Long captainPlayerId;
 

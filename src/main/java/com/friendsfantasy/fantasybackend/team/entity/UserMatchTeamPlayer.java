@@ -43,6 +43,12 @@ public class UserMatchTeamPlayer {
     @Column(name = "is_vice_captain", nullable = false)
     private Boolean isViceCaptain = false;
 
+    @Column(name = "is_substitute", nullable = false)
+    private Boolean isSubstitute = false;
+
+    @Column(name = "substitute_priority")
+    private Integer substitutePriority;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 }

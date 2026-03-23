@@ -13,7 +13,7 @@ public class UserStatsResponse {
     private Integer totalContestsWon;
     private Integer totalPointsWon;
     private Integer totalPointsSpent;
-    private Integer totalRoomsCreated;
+    private Integer totalCommunitiesCreated;
     private BigDecimal winRate;
     private Integer bestRank;
 }
