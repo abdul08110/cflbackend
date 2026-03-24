@@ -1,0 +1,6 @@
+2025/08/11-13:20:13.152 3560 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.hostingraja.in_0.indexeddb.leveldb since it was missing.
+2025/08/11-13:20:13.157 3560 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.hostingraja.in_0.indexeddb.leveldb/MANIFEST-000001
+2025/08/11-13:20:38.198 3560 Level-0 table #5: started
+2025/08/11-13:20:38.202 3560 Level-0 table #5: 1268 bytes OK
+2025/08/11-13:20:38.205 3560 Delete type=0 #3
+2025/08/11-13:20:38.206 3560 Manual compaction at level-0 from (begin) .. (end); will stop at (end)

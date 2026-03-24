@@ -1,0 +1,6 @@
+2025/07/29-13:19:29.865 19a8 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_razorpay.com_0.indexeddb.leveldb since it was missing.
+2025/07/29-13:19:29.873 19a8 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_razorpay.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/07/29-13:19:38.363 2cc4 Level-0 table #5: started
+2025/07/29-13:19:38.366 2cc4 Level-0 table #5: 843 bytes OK
+2025/07/29-13:19:38.369 2cc4 Delete type=0 #3
+2025/07/29-13:19:38.370 2cc4 Manual compaction at level-0 from (begin) .. (end); will stop at (end)

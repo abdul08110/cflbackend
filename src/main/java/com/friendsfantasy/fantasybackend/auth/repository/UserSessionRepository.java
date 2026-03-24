@@ -11,4 +11,9 @@ public interface UserSessionRepository extends JpaRepository<UserSession, Long> 
     Optional<UserSession> findByRefreshTokenHashAndRevokedAtIsNull(String refreshTokenHash);
 
     List<UserSession> findAllByUserIdAndRevokedAtIsNull(Long userId);
+
+    Optional<UserSession> findFirstByUserIdAndDeviceIdAndRevokedAtIsNullOrderByCreatedAtDesc(
+            Long userId,
+            String deviceId
+    );
 }

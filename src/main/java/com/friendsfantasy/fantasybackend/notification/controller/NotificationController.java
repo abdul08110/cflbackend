@@ -1,9 +1,11 @@
 package com.friendsfantasy.fantasybackend.notification.controller;
 
 import com.friendsfantasy.fantasybackend.common.ApiResponse;
+import com.friendsfantasy.fantasybackend.notification.dto.NotificationDeviceTokenRequest;
 import com.friendsfantasy.fantasybackend.notification.dto.NotificationResponse;
 import com.friendsfantasy.fantasybackend.notification.dto.NotificationUnreadCountResponse;
 import com.friendsfantasy.fantasybackend.notification.service.NotificationService;
+import jakarta.validation.Valid;
 import com.friendsfantasy.fantasybackend.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -57,6 +59,17 @@ public class NotificationController {
         return ApiResponse.ok(
                 "Notifications marked as read",
                 notificationService.markAllAsRead(principal.getId())
+        );
+    }
+
+    @PostMapping("/device-token")
+    public ApiResponse<Map<String, Object>> registerDeviceToken(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody NotificationDeviceTokenRequest request
+    ) {
+        return ApiResponse.ok(
+                "Device token updated successfully",
+                notificationService.registerDeviceToken(principal.getId(), request)
         );
     }
 }

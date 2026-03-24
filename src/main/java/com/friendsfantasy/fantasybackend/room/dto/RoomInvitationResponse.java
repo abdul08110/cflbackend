@@ -12,6 +12,7 @@ public class RoomInvitationResponse {
     private Long communityId;
     private String communityName;
     private String invitedBy;
+    private String invitedByUsername;
     private Integer joiningPoints;
     private Integer maxSpots;
     private Long joinedMembers;

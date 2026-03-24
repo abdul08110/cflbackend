@@ -1,0 +1,15 @@
+2026/03/23-16:15:35.012 47a0 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_chatgpt.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/23-16:15:35.013 47a0 Recovering log #195
+2026/03/23-16:15:35.013 47a0 Reusing old log C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_chatgpt.com_0.indexeddb.leveldb/000195.log 
+2026/03/23-16:15:38.601 2638 Level-0 table #200: started
+2026/03/23-16:15:38.604 2638 Level-0 table #200: 209 bytes OK
+2026/03/23-16:15:38.607 2638 Delete type=0 #195
+2026/03/23-16:15:38.607 2638 Manual compaction at level-0 from (begin) .. (end); will stop at (end)
+2026/03/23-16:15:38.607 2638 Manual compaction at level-1 from (begin) .. (end); will stop at '\x00\x00\x00\x00\x06' @ 695 : 1
+2026/03/23-16:15:38.607 2638 Compacting 1@1 + 1@2 files
+2026/03/23-16:15:38.610 2638 Generated table #201@1: 77 keys, 77427 bytes
+2026/03/23-16:15:38.610 2638 Compacted 1@1 + 1@2 files => 77427 bytes
+2026/03/23-16:15:38.612 2638 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/03/23-16:15:38.612 2638 Delete type=2 #197
+2026/03/23-16:15:38.612 2638 Delete type=2 #200
+2026/03/23-16:15:38.613 2638 Manual compaction at level-1 from '\x00\x00\x00\x00\x06' @ 695 : 1 .. (end); will stop at (end)

@@ -4,6 +4,7 @@ import com.friendsfantasy.fantasybackend.common.ApiResponse;
 import com.friendsfantasy.fantasybackend.contest.dto.*;
 import com.friendsfantasy.fantasybackend.contest.service.ContestEntryService;
 import com.friendsfantasy.fantasybackend.security.UserPrincipal;
+import com.friendsfantasy.fantasybackend.team.dto.TeamResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -43,10 +44,25 @@ public class ContestEntryController {
     }
 
     @GetMapping("/contests/{contestId}/leaderboard")
-    public ApiResponse<List<LeaderboardEntryResponse>> getLeaderboard(@PathVariable Long contestId) {
+    public ApiResponse<List<LeaderboardEntryResponse>> getLeaderboard(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long contestId
+    ) {
         return ApiResponse.ok(
                 "Contest leaderboard fetched successfully",
-                contestEntryService.getLeaderboard(contestId)
+                contestEntryService.getLeaderboard(contestId, principal.getId())
+        );
+    }
+
+    @GetMapping("/contests/{contestId}/teams/{teamId}")
+    public ApiResponse<TeamResponse> getContestTeamView(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long contestId,
+            @PathVariable Long teamId
+    ) {
+        return ApiResponse.ok(
+                "Contest team fetched successfully",
+                contestEntryService.getContestTeamView(principal.getId(), contestId, teamId)
         );
     }
 

@@ -10,6 +10,7 @@ import java.util.List;
 @Builder
 public class RoomAvailableContestResponse {
     private Long contestId;
+    private Long communityId;
     private Long fixtureId;
     private String contestName;
     private Integer entryFeePoints;
@@ -21,6 +22,13 @@ public class RoomAvailableContestResponse {
     private Boolean joinConfirmRequired;
     private Integer firstPrizePoints;
     private String contestStatus;
+    private Long createdByUserId;
+    private String createdByUsername;
+    private String fixtureLeague;
+    private Integer myEntriesCount;
+    private Boolean joinedByMe;
+    private Boolean canJoin;
+    private Boolean canInvite;
 
     private String fixtureTitle;
     private LocalDateTime fixtureStartTime;

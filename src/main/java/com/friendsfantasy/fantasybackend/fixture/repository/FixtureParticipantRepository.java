@@ -12,6 +12,7 @@ import java.util.Optional;
 
 public interface FixtureParticipantRepository extends JpaRepository<FixtureParticipant, Long> {
     List<FixtureParticipant> findByFixtureIdOrderByIsHomeDescTeamNameAsc(Long fixtureId);
+    List<FixtureParticipant> findByFixtureIdInOrderByFixtureIdAscIsHomeDescTeamNameAsc(List<Long> fixtureIds);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""

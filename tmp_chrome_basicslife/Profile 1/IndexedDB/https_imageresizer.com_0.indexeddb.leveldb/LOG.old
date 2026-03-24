@@ -1,0 +1,6 @@
+2025/11/24-11:23:00.140 2864 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_imageresizer.com_0.indexeddb.leveldb since it was missing.
+2025/11/24-11:23:00.152 2864 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_imageresizer.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/11/24-11:23:00.173 28f4 Level-0 table #5: started
+2025/11/24-11:23:00.179 28f4 Level-0 table #5: 1942 bytes OK
+2025/11/24-11:23:00.184 28f4 Delete type=0 #3
+2025/11/24-11:23:00.184 2864 Manual compaction at level-0 from '\x00\x02\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x03\x00\x00\x00' @ 0 : 0; will stop at (end)

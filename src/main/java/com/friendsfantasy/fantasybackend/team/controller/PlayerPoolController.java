@@ -23,7 +23,13 @@ public class PlayerPoolController {
     }
 
     @GetMapping("/fixtures/{fixtureId}/player-pool")
-    public ApiResponse<List<FixturePlayerPoolResponse>> getPlayerPool(@PathVariable Long fixtureId) {
-        return ApiResponse.ok("Fixture player pool fetched successfully", teamService.getFixturePlayerPool(fixtureId));
+    public ApiResponse<List<FixturePlayerPoolResponse>> getPlayerPool(
+            @PathVariable Long fixtureId,
+            @RequestParam(name = "forceSync", defaultValue = "false") boolean forceSync
+    ) {
+        return ApiResponse.ok(
+                "Fixture player pool fetched successfully",
+                teamService.getFixturePlayerPool(fixtureId, forceSync)
+        );
     }
 }

@@ -16,7 +16,21 @@ public interface ContestRepository extends JpaRepository<Contest, Long> {
             Contest.ContestType contestType
     );
 
-    Optional<Contest> findByRoomId(Long roomId);
+    List<Contest> findByRoomIdOrderByCreatedAtDescIdDesc(Long roomId);
+
+    List<Contest> findByRoomIdAndStatusInOrderByCreatedAtDescIdDesc(
+            Long roomId,
+            Collection<Contest.Status> statuses
+    );
+
+    List<Contest> findByContestTypeAndStatusInOrderByCreatedAtDescIdDesc(
+            Contest.ContestType contestType,
+            Collection<Contest.Status> statuses
+    );
+
+    List<Contest> findByStatusInOrderByCreatedAtDescIdDesc(Collection<Contest.Status> statuses);
+
+    Optional<Contest> findByIdAndRoomId(Long contestId, Long roomId);
 
     List<Contest> findByFixtureIdInAndStatusInOrderByFixtureIdAscEntryFeePointsAscIdAsc(
             List<Long> fixtureIds,
@@ -28,4 +42,6 @@ public interface ContestRepository extends JpaRepository<Contest, Long> {
             Contest.ContestType contestType,
             Collection<Contest.Status> statuses
     );
+
+    long countByRoomId(Long roomId);
 }

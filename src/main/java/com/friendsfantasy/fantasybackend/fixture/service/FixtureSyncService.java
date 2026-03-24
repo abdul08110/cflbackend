@@ -13,6 +13,7 @@ import com.friendsfantasy.fantasybackend.fixture.repository.FixtureParticipantRe
 import com.friendsfantasy.fantasybackend.fixture.repository.FixtureRepository;
 import com.friendsfantasy.fantasybackend.integration.sportmonks.SportMonksCricketClient;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -129,27 +130,22 @@ public class FixtureSyncService {
     }
 
     public List<FixtureSummaryResponse> getUpcomingFixtures() {
+        return getUpcomingFixtures(null);
+    }
+
+    public List<FixtureSummaryResponse> getUpcomingFixtures(Integer limit) {
         LocalDateTime now = LocalDateTime.now(ZoneId.of("Asia/Kolkata"));
-        List<Fixture> fixtures = fixtureRepository
-                .findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(
-                        cricketSportId,
-                        now);
+        List<Fixture> fixtures = findUpcomingFixtures(now, limit);
+        List<Fixture> fixturesForSyncCheck = (limit != null && limit > 0)
+                ? findUpcomingFixtures(now, null)
+                : fixtures;
 
-        if (syncOnReadEnabled && shouldSyncUpcomingFixtures(fixtures, now)) {
+        if (syncOnReadEnabled && shouldSyncUpcomingFixtures(fixturesForSyncCheck, now)) {
             syncUpcomingFixtures();
-            fixtures = fixtureRepository.findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(
-                    cricketSportId,
-                    now
-            );
+            fixtures = findUpcomingFixtures(now, limit);
         }
 
-        List<FixtureSummaryResponse> response = new ArrayList<>();
-
-        for (Fixture fixture : fixtures) {
-            response.add(mapFixtureSummary(fixture));
-        }
-
-        return response;
+        return mapFixtureSummaries(fixtures);
     }
 
     public FixtureDetailResponse getFixtureDetail(Long fixtureId) {
@@ -352,23 +348,62 @@ public class FixtureSyncService {
         return textValue(relatedNode, field, "");
     }
 
-    private FixtureSummaryResponse mapFixtureSummary(Fixture fixture) {
-        List<FixtureParticipant> participants = fixtureParticipantRepository
-                .findByFixtureIdOrderByIsHomeDescTeamNameAsc(fixture.getId());
-        FixtureSnapshotMapper.FixtureSnapshot snapshot = fixtureSnapshotMapper.buildSnapshot(fixture, participants);
+    private List<FixtureSummaryResponse> mapFixtureSummaries(List<Fixture> fixtures) {
+        if (fixtures.isEmpty()) {
+            return List.of();
+        }
 
-        return FixtureSummaryResponse.builder()
-                .fixtureId(fixture.getId())
-                .externalFixtureId(fixture.getExternalFixtureId())
-                .externalLeagueId(fixture.getExternalLeagueId())
-                .title(fixture.getTitle())
-                .status(fixture.getStatus())
-                .league(snapshot.league())
-                .venue(snapshot.venue())
-                .startTime(fixture.getStartTime())
-                .deadlineTime(fixture.getDeadlineTime())
-                .participants(mapParticipants(participants))
-                .build();
+        List<Long> fixtureIds = fixtures.stream()
+                .map(Fixture::getId)
+                .toList();
+        List<FixtureParticipant> allParticipants = fixtureParticipantRepository
+                .findByFixtureIdInOrderByFixtureIdAscIsHomeDescTeamNameAsc(fixtureIds);
+
+        Map<Long, List<FixtureParticipant>> participantsByFixtureId = new HashMap<>();
+        for (Fixture fixture : fixtures) {
+            participantsByFixtureId.put(fixture.getId(), new ArrayList<>());
+        }
+        for (FixtureParticipant participant : allParticipants) {
+            participantsByFixtureId
+                    .computeIfAbsent(participant.getFixtureId(), ignored -> new ArrayList<>())
+                    .add(participant);
+        }
+
+        List<FixtureSummaryResponse> response = new ArrayList<>();
+        for (Fixture fixture : fixtures) {
+            List<FixtureParticipant> participants = participantsByFixtureId.getOrDefault(fixture.getId(), List.of());
+            FixtureSnapshotMapper.FixtureSnapshot snapshot = fixtureSnapshotMapper.buildSnapshot(fixture, participants);
+
+            response.add(FixtureSummaryResponse.builder()
+                    .fixtureId(fixture.getId())
+                    .externalFixtureId(fixture.getExternalFixtureId())
+                    .externalLeagueId(fixture.getExternalLeagueId())
+                    .title(fixture.getTitle())
+                    .status(fixture.getStatus())
+                    .league(snapshot.league())
+                    .venue(snapshot.venue())
+                    .startTime(fixture.getStartTime())
+                    .deadlineTime(fixture.getDeadlineTime())
+                    .participants(mapParticipants(participants))
+                    .build());
+        }
+
+        return response;
+    }
+
+    private List<Fixture> findUpcomingFixtures(LocalDateTime now, Integer limit) {
+        if (limit != null && limit > 0) {
+            return fixtureRepository.findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(
+                    cricketSportId,
+                    now,
+                    PageRequest.of(0, limit)
+            );
+        }
+
+        return fixtureRepository.findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(
+                cricketSportId,
+                now
+        );
     }
 
     private Fixture refreshFixtureSnapshotIfNeeded(Fixture fixture) {

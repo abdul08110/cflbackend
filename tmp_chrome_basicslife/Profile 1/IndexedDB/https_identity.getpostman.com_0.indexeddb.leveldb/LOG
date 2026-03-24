@@ -1,0 +1,6 @@
+2025/12/05-17:51:45.211 3e98 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_identity.getpostman.com_0.indexeddb.leveldb since it was missing.
+2025/12/05-17:51:45.228 3e98 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_identity.getpostman.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/12/05-17:51:48.852 3e98 Level-0 table #5: started
+2025/12/05-17:51:48.855 3e98 Level-0 table #5: 1259 bytes OK
+2025/12/05-17:51:48.860 3e98 Delete type=0 #3
+2025/12/05-17:51:48.861 3e98 Manual compaction at level-0 from (begin) .. (end); will stop at (end)

@@ -5,9 +5,11 @@ import com.friendsfantasy.fantasybackend.auth.entity.User;
 import com.friendsfantasy.fantasybackend.auth.service.AuthService;
 import com.friendsfantasy.fantasybackend.auth.service.OtpService;
 import com.friendsfantasy.fantasybackend.common.ApiResponse;
+import com.friendsfantasy.fantasybackend.security.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -81,5 +83,57 @@ public class AuthController {
     public ApiResponse<Object> logout(@Valid @RequestBody LogoutRequest request) {
         authService.logout(request);
         return ApiResponse.ok("Logout successful", null);
+    }
+
+    @PostMapping("/password/forgot/request")
+    public ApiResponse<Map<String, Object>> sendForgotPasswordOtp(
+            @Valid @RequestBody ForgotPasswordRequest request
+    ) {
+        return ApiResponse.ok(
+                "Password reset OTP sent successfully",
+                authService.sendForgotPasswordOtp(request)
+        );
+    }
+
+    @PostMapping("/password/forgot/confirm")
+    public ApiResponse<Map<String, Object>> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request
+    ) {
+        return ApiResponse.ok(
+                "Password reset successfully",
+                authService.resetPassword(request)
+        );
+    }
+
+    @PostMapping("/password/change")
+    public ApiResponse<Map<String, Object>> changePassword(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody ChangePasswordRequest request
+    ) {
+        return ApiResponse.ok(
+                "Password changed successfully",
+                authService.changePassword(principal.getId(), request)
+        );
+    }
+
+    @PostMapping("/password/change/request-otp")
+    public ApiResponse<Map<String, Object>> sendChangePasswordOtp(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        return ApiResponse.ok(
+                "Password change OTP sent successfully",
+                authService.sendChangePasswordOtp(principal.getId())
+        );
+    }
+
+    @PostMapping("/password/change/confirm-otp")
+    public ApiResponse<Map<String, Object>> changePasswordWithOtp(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody ChangePasswordWithOtpRequest request
+    ) {
+        return ApiResponse.ok(
+                "Password changed successfully",
+                authService.changePasswordWithOtp(principal.getId(), request)
+        );
     }
 }

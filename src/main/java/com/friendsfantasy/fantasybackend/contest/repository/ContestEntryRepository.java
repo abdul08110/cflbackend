@@ -10,11 +10,14 @@ public interface ContestEntryRepository extends JpaRepository<ContestEntry, Long
 
     boolean existsByContestIdAndUserMatchTeamId(Long contestId, Long userMatchTeamId);
 
+    boolean existsByUserMatchTeamId(Long userMatchTeamId);
+
     boolean existsByContestIdAndUserId(Long contestId, Long userId);
 
     List<ContestEntry> findByContestIdAndUserIdOrderByJoinedAtAsc(Long contestId, Long userId);
 
     Optional<ContestEntry> findByContestIdAndUserId(Long contestId, Long userId);
+    Optional<ContestEntry> findFirstByContestIdAndUserIdAndUserMatchTeamIdIsNullOrderByJoinedAtAsc(Long contestId, Long userId);
 
     Optional<ContestEntry> findByContestIdAndUserMatchTeamId(Long contestId, Long userMatchTeamId);
 
@@ -27,4 +30,6 @@ public interface ContestEntryRepository extends JpaRepository<ContestEntry, Long
     List<ContestEntry> findByUserIdOrderByJoinedAtDesc(Long userId);
 
     boolean existsByContestIdAndUserIdAndPrizePointsAwardedGreaterThan(Long contestId, Long userId, Integer prizePoints);
+
+    long countByContestIdAndUserId(Long contestId, Long userId);
 }

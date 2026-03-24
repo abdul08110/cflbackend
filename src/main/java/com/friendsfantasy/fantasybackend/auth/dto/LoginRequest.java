@@ -15,4 +15,5 @@ public class LoginRequest {
     private String deviceId;
     private String deviceName;
     private String platform;
+    private String pushToken;
 }

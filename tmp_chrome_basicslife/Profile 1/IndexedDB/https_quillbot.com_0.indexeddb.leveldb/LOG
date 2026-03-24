@@ -1,0 +1,16 @@
+2026/01/05-10:56:55.250 3478 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_quillbot.com_0.indexeddb.leveldb since it was missing.
+2026/01/05-10:56:55.257 3478 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_quillbot.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/01/05-10:56:55.450 34c0 Level-0 table #5: started
+2026/01/05-10:56:55.453 34c0 Level-0 table #5: 1688 bytes OK
+2026/01/05-10:56:55.467 34c0 Delete type=0 #3
+2026/01/05-10:56:55.468 34c0 Manual compaction at level-0 from '\x00\x01\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x02\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/01/05-10:57:09.238 34c0 Level-0 table #7: started
+2026/01/05-10:57:09.241 34c0 Level-0 table #7: 5278 bytes OK
+2026/01/05-10:57:09.244 34c0 Delete type=0 #4
+2026/01/05-10:57:09.245 34c0 Manual compaction at level-0 from '\x00\x05\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x06\x00\x00\x00' @ 0 : 0; will stop at (end)
+2026/01/05-10:58:36.930 3484 Compacting 1@1 + 1@2 files
+2026/01/05-10:58:36.972 3484 Generated table #8@1: 54 keys, 3917 bytes
+2026/01/05-10:58:36.972 3484 Compacted 1@1 + 1@2 files => 3917 bytes
+2026/01/05-10:58:36.974 3484 compacted to: files[ 0 0 1 0 0 0 0 ]
+2026/01/05-10:58:36.974 3484 Delete type=2 #5
+2026/01/05-10:58:36.975 3484 Delete type=2 #7

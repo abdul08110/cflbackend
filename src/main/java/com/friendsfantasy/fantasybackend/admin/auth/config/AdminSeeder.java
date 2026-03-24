@@ -25,6 +25,12 @@ public class AdminSeeder implements CommandLineRunner {
     @Value("${app.admin.seed-default.password:}")
     private String defaultAdminPassword;
 
+    @Value("${app.admin.seed-default.secondary-username:}")
+    private String secondaryAdminUsername;
+
+    @Value("${app.admin.seed-default.secondary-password:}")
+    private String secondaryAdminPassword;
+
     @Override
     public void run(String... args) {
         if (defaultAdminUsername == null || defaultAdminUsername.isBlank()
@@ -33,18 +39,27 @@ public class AdminSeeder implements CommandLineRunner {
                     "Default admin seeding is enabled, but username/password were not configured");
         }
 
-        if (adminUserRepository.findByUsername(defaultAdminUsername).isEmpty()) {
-            AdminUser admin = AdminUser.builder()
-                    .username(defaultAdminUsername)
-                    .passwordHash(passwordEncoder.encode(defaultAdminPassword))
-                    .active(true)
-                    .build();
+        seedAdmin(defaultAdminUsername, defaultAdminPassword, "default");
 
-            adminUserRepository.save(admin);
-            log.info("Default admin user '{}' created", defaultAdminUsername);
+        if (secondaryAdminUsername != null && !secondaryAdminUsername.isBlank()
+                && secondaryAdminPassword != null && !secondaryAdminPassword.isBlank()) {
+            seedAdmin(secondaryAdminUsername, secondaryAdminPassword, "secondary");
+        }
+    }
+
+    private void seedAdmin(String username, String password, String label) {
+        if (adminUserRepository.findByUsername(username).isPresent()) {
+            log.info("{} admin user '{}' already exists", label, username);
             return;
         }
 
-        log.info("Default admin user '{}' already exists", defaultAdminUsername);
+        AdminUser admin = AdminUser.builder()
+                .username(username)
+                .passwordHash(passwordEncoder.encode(password))
+                .active(true)
+                .build();
+
+        adminUserRepository.save(admin);
+        log.info("{} admin user '{}' created", label, username);
     }
 }

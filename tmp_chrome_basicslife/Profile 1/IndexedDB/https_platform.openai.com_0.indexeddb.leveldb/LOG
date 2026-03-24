@@ -1,0 +1,6 @@
+2026/03/20-12:53:50.618 2b84 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_platform.openai.com_0.indexeddb.leveldb since it was missing.
+2026/03/20-12:53:50.625 2b84 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_platform.openai.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/20-13:02:06.757 34ac Level-0 table #5: started
+2026/03/20-13:02:06.759 34ac Level-0 table #5: 1165 bytes OK
+2026/03/20-13:02:06.762 34ac Delete type=0 #3
+2026/03/20-13:02:06.762 34ac Manual compaction at level-0 from (begin) .. (end); will stop at (end)

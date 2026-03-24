@@ -1,0 +1,6 @@
+2026/01/29-17:02:05.898 23f4 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_mediamodifier.com_0.indexeddb.leveldb since it was missing.
+2026/01/29-17:02:05.909 23f4 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_mediamodifier.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/01/29-17:02:08.588 ce8 Level-0 table #5: started
+2026/01/29-17:02:08.590 ce8 Level-0 table #5: 1268 bytes OK
+2026/01/29-17:02:08.592 ce8 Delete type=0 #3
+2026/01/29-17:02:08.593 ce8 Manual compaction at level-0 from (begin) .. (end); will stop at (end)

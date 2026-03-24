@@ -1,0 +1,6 @@
+2025/07/22-12:16:03.747 385c Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.tripadvisor.in_0.indexeddb.leveldb since it was missing.
+2025/07/22-12:16:03.755 385c Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.tripadvisor.in_0.indexeddb.leveldb/MANIFEST-000001
+2025/07/22-12:16:05.779 386c Level-0 table #5: started
+2025/07/22-12:16:05.781 386c Level-0 table #5: 3876 bytes OK
+2025/07/22-12:16:05.784 386c Delete type=0 #3
+2025/07/22-12:16:05.784 386c Manual compaction at level-0 from (begin) .. (end); will stop at (end)

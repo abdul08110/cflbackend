@@ -12,7 +12,7 @@ import com.friendsfantasy.fantasybackend.contest.repository.ContestRepository;
 import com.friendsfantasy.fantasybackend.fixture.entity.Fixture;
 import com.friendsfantasy.fantasybackend.fixture.repository.FixtureRepository;
 import com.friendsfantasy.fantasybackend.notification.entity.Notification;
-import com.friendsfantasy.fantasybackend.notification.repository.NotificationRepository;
+import com.friendsfantasy.fantasybackend.notification.service.NotificationService;
 import com.friendsfantasy.fantasybackend.room.entity.Room;
 import com.friendsfantasy.fantasybackend.room.entity.RoomMember;
 import com.friendsfantasy.fantasybackend.room.repository.RoomMemberRepository;
@@ -20,11 +20,13 @@ import com.friendsfantasy.fantasybackend.room.repository.RoomRepository;
 import com.friendsfantasy.fantasybackend.stats.entity.UserStats;
 import com.friendsfantasy.fantasybackend.stats.service.UserStatsService;
 import com.friendsfantasy.fantasybackend.team.entity.UserMatchTeam;
+import com.friendsfantasy.fantasybackend.team.dto.TeamResponse;
 import com.friendsfantasy.fantasybackend.team.repository.UserMatchTeamRepository;
 import com.friendsfantasy.fantasybackend.team.service.TeamService;
 import com.friendsfantasy.fantasybackend.wallet.entity.WalletTransaction;
 import com.friendsfantasy.fantasybackend.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,7 @@ import java.util.*;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ContestEntryService {
 
     private static final int COMMUNITY_PAYOUT_PERCENT = 75;
@@ -49,7 +52,7 @@ public class ContestEntryService {
     private final RoomMemberRepository roomMemberRepository;
     private final UserStatsService userStatsService;
     private final TeamService teamService;
-    private final NotificationRepository notificationRepository;
+    private final NotificationService notificationService;
     private final CricketFantasyScoringService cricketFantasyScoringService;
 
     @Transactional
@@ -57,29 +60,10 @@ public class ContestEntryService {
         Contest contest = contestRepository.findById(contestId)
                 .orElseThrow(() -> new RuntimeException("Contest not found"));
 
-        if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
-            throw new RuntimeException("Join the community instead of joining this contest directly");
-        }
-
-        if (contest.getStatus() != Contest.Status.OPEN) {
-            throw new RuntimeException("Contest is not open for joining");
-        }
-
-        if (contest.getSpotsFilled() >= contest.getMaxSpots()) {
-            contest.setStatus(Contest.Status.FULL);
-            contestRepository.save(contest);
-            throw new RuntimeException("Contest is full");
-        }
-
-        if (Boolean.TRUE.equals(contest.getJoinConfirmRequired())
-                && !Boolean.TRUE.equals(request.getConfirmJoin())) {
-            throw new RuntimeException("Join confirmation is required for this contest");
-        }
-
         Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
                 .orElseThrow(() -> new RuntimeException("Fixture not found"));
 
-        if (fixture.getDeadlineTime().isBefore(LocalDateTime.now())) {
+        if (fixture.getDeadlineTime() == null || !fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
             throw new RuntimeException("Contest join is closed for this fixture");
         }
 
@@ -94,7 +78,42 @@ public class ContestEntryService {
             throw new RuntimeException("This team is already joined in the contest");
         }
 
-        validateOptionalRoom(userId, request.getRoomId(), fixture.getSportId());
+        Long roomId = request.getRoomId();
+        ContestEntry reservedEntry = null;
+        if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
+            roomId = validateCommunityContestAccess(userId, contest, fixture.getSportId());
+            reservedEntry = contestEntryRepository
+                    .findFirstByContestIdAndUserIdAndUserMatchTeamIdIsNullOrderByJoinedAtAsc(contestId, userId)
+                    .orElse(null);
+            if (reservedEntry == null) {
+                validateCommunityJoinAllowed(contest);
+            } else if (contest.getStatus() != Contest.Status.OPEN && contest.getStatus() != Contest.Status.FULL) {
+                throw new RuntimeException("Contest is not open for team selection");
+            }
+        } else {
+            if (contest.getStatus() != Contest.Status.OPEN) {
+                throw new RuntimeException("Contest is not open for joining");
+            }
+
+            if (contest.getSpotsFilled() >= contest.getMaxSpots()) {
+                contest.setStatus(Contest.Status.FULL);
+                contestRepository.save(contest);
+                throw new RuntimeException("Contest is full");
+            }
+
+            if (Boolean.TRUE.equals(contest.getJoinConfirmRequired())
+                    && !Boolean.TRUE.equals(request.getConfirmJoin())) {
+                throw new RuntimeException("Join confirmation is required for this contest");
+            }
+            validateOptionalRoom(userId, roomId, fixture.getSportId());
+        }
+
+        if (reservedEntry != null) {
+            reservedEntry.setRoomId(roomId);
+            reservedEntry.setUserMatchTeamId(team.getId());
+            reservedEntry = contestEntryRepository.save(reservedEntry);
+            return mapContestEntry(reservedEntry);
+        }
 
         WalletTransaction walletTxn = walletService.debitForContestJoin(
                 userId,
@@ -106,7 +125,7 @@ public class ContestEntryService {
         ContestEntry entry = ContestEntry.builder()
                 .contestId(contestId)
                 .userId(userId)
-                .roomId(request.getRoomId())
+                .roomId(roomId)
                 .userMatchTeamId(team.getId())
                 .walletTransactionId(walletTxn.getId())
                 .entryFeePoints(contest.getEntryFeePoints())
@@ -114,11 +133,15 @@ public class ContestEntryService {
 
         entry = contestEntryRepository.save(entry);
 
-        contest.setSpotsFilled(contest.getSpotsFilled() + 1);
-        if (contest.getSpotsFilled() >= contest.getMaxSpots()) {
-            contest.setStatus(Contest.Status.FULL);
+        if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
+            updateCommunityPrizeState(contest);
+        } else {
+            contest.setSpotsFilled(contest.getSpotsFilled() + 1);
+            if (contest.getSpotsFilled() >= contest.getMaxSpots()) {
+                contest.setStatus(Contest.Status.FULL);
+            }
+            contestRepository.save(contest);
         }
-        contestRepository.save(contest);
 
         userStatsService.recordContestJoin(userId, contest.getEntryFeePoints());
 
@@ -126,46 +149,39 @@ public class ContestEntryService {
     }
 
     @Transactional
-    public ContestEntryResponse createCommunityEntry(Long userId, Long roomId) {
-        Room room = roomRepository.findById(roomId)
-                .orElseThrow(() -> new RuntimeException("Community not found"));
-
-        if (room.getStatus() != Room.Status.ACTIVE) {
-            throw new RuntimeException("Community is not active");
-        }
-
-        roomMemberRepository.findByRoomIdAndUserId(roomId, userId)
-                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
-                .orElseThrow(() -> new RuntimeException("You are not a member of this community"));
-
-        Contest contest = findCommunityContest(roomId);
-        syncCommunityContestState(roomId);
-        contest = contestRepository.findById(contest.getId())
+    public ContestEntryResponse reserveCommunityContestSpot(Long userId, Long contestId) {
+        Contest contest = contestRepository.findById(contestId)
                 .orElseThrow(() -> new RuntimeException("Contest not found"));
 
-        validateCommunityJoinAllowed(contest);
+        if (contest.getContestType() != Contest.ContestType.COMMUNITY) {
+            throw new RuntimeException("Only community contests support reserved creator spots");
+        }
 
-        if (contestEntryRepository.existsByContestIdAndUserId(contest.getId(), userId)) {
-            throw new RuntimeException("You have already joined this community");
+        Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
+                .orElseThrow(() -> new RuntimeException("Fixture not found"));
+
+        Long roomId = validateCommunityContestMembership(userId, contest, fixture.getSportId());
+        if (contestEntryRepository.existsByContestIdAndUserId(contestId, userId)) {
+            throw new RuntimeException("User has already joined this contest");
         }
 
         WalletTransaction walletTxn = walletService.debitForContestJoin(
                 userId,
                 contest.getEntryFeePoints(),
-                contest.getId(),
-                "Community join - " + contest.getContestName()
+                contestId,
+                "Community contest creator reserve - " + contest.getContestName()
         );
 
         ContestEntry entry = ContestEntry.builder()
-                .contestId(contest.getId())
+                .contestId(contestId)
                 .userId(userId)
                 .roomId(roomId)
+                .userMatchTeamId(null)
                 .walletTransactionId(walletTxn.getId())
                 .entryFeePoints(contest.getEntryFeePoints())
                 .build();
 
         entry = contestEntryRepository.save(entry);
-
         updateCommunityPrizeState(contest);
         userStatsService.recordContestJoin(userId, contest.getEntryFeePoints());
 
@@ -173,47 +189,70 @@ public class ContestEntryService {
     }
 
     @Transactional
+    public ContestEntryResponse createCommunityEntry(Long userId, Long roomId) {
+        throw new RuntimeException("Join a specific community contest instead of joining the community itself");
+    }
+
+    @Transactional
     public ContestEntryResponse attachTeamToCommunityEntry(Long userId, Long roomId, Long teamId) {
-        Contest contest = findCommunityContest(roomId);
-        Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
-                .orElseThrow(() -> new RuntimeException("Fixture not found"));
-
-        if (!fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
-            throw new RuntimeException("Team creation is closed for this community");
-        }
-
-        ContestEntry entry = contestEntryRepository.findByContestIdAndUserId(contest.getId(), userId)
-                .orElseThrow(() -> new RuntimeException("You have not joined this community"));
-
-        if (entry.getStatus() != ContestEntry.Status.JOINED) {
-            throw new RuntimeException("This community entry can no longer be updated");
-        }
-
-        UserMatchTeam team = userMatchTeamRepository.findByIdAndUserId(teamId, userId)
-                .orElseThrow(() -> new RuntimeException("Team not found"));
-
-        if (!Objects.equals(team.getFixtureId(), contest.getFixtureId())) {
-            throw new RuntimeException("Selected team does not belong to this community fixture");
-        }
-
-        if (!Objects.equals(entry.getUserMatchTeamId(), teamId)
-                && contestEntryRepository.existsByContestIdAndUserMatchTeamId(contest.getId(), teamId)) {
-            throw new RuntimeException("This team is already attached to the community");
-        }
-
-        entry.setUserMatchTeamId(teamId);
-        contestEntryRepository.save(entry);
-        return mapContestEntry(entry);
+        throw new RuntimeException("Join a specific community contest with the team you want to use");
     }
 
     @Transactional
     public void syncCommunityContestState(Long roomId) {
-        Contest contest = contestRepository.findByRoomId(roomId).orElse(null);
-        if (contest == null || contest.getContestType() != Contest.ContestType.COMMUNITY) {
-            return;
+        List<Contest> contests = contestRepository.findByRoomIdOrderByCreatedAtDescIdDesc(roomId);
+        for (Contest contest : contests) {
+            if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
+                try {
+                    syncCommunityContestState(contest);
+                } catch (Exception ex) {
+                    log.warn("Community contest sync failed for contest {}", contest.getId(), ex);
+                }
+            }
+        }
+    }
+
+    @Transactional
+    public Map<String, Object> syncDueCommunityContests() {
+        List<Contest> contests = contestRepository.findByContestTypeAndStatusInOrderByCreatedAtDescIdDesc(
+                Contest.ContestType.COMMUNITY,
+                List.of(Contest.Status.OPEN, Contest.Status.FULL, Contest.Status.LIVE)
+        );
+
+        int changed = 0;
+        int cancelled = 0;
+        int live = 0;
+
+        for (Contest contest : contests) {
+            Contest.Status beforeStatus = contest.getStatus();
+            try {
+                syncCommunityContestState(contest);
+            } catch (Exception ex) {
+                log.warn("Scheduled community contest sync failed for contest {}", contest.getId(), ex);
+                continue;
+            }
+
+            Contest.Status afterStatus = contestRepository.findById(contest.getId())
+                    .map(Contest::getStatus)
+                    .orElse(beforeStatus);
+
+            if (afterStatus != beforeStatus) {
+                changed++;
+            }
+            if (afterStatus == Contest.Status.CANCELLED) {
+                cancelled++;
+            }
+            if (afterStatus == Contest.Status.LIVE) {
+                live++;
+            }
         }
 
-        syncCommunityContestState(contest);
+        Map<String, Object> result = new HashMap<>();
+        result.put("scanned", contests.size());
+        result.put("statusChanged", changed);
+        result.put("cancelled", cancelled);
+        result.put("live", live);
+        return result;
     }
 
     @Transactional
@@ -234,17 +273,20 @@ public class ContestEntryService {
         }
     }
 
-    public ContestEntryResponse getCommunityEntry(Long userId, Long roomId) {
-        Contest contest = contestRepository.findByRoomId(roomId).orElse(null);
-        if (contest == null) {
-            return null;
+    @Transactional
+    public void cancelCommunityContestsForRoomClosure(Long roomId, String roomName) {
+        List<Contest> contests = contestRepository.findByRoomIdAndStatusInOrderByCreatedAtDescIdDesc(
+                roomId,
+                List.of(Contest.Status.OPEN, Contest.Status.FULL, Contest.Status.LIVE)
+        );
+
+        for (Contest contest : contests) {
+            cancelCommunityContestForRoomClosure(contest, roomName);
         }
+    }
 
-        syncFixtureFantasyPointsIfNeeded(contest, false);
-
-        return contestEntryRepository.findByContestIdAndUserId(contest.getId(), userId)
-                .map(this::mapContestEntry)
-                .orElse(null);
+    public ContestEntryResponse getCommunityEntry(Long userId, Long roomId) {
+        throw new RuntimeException("Open a specific community contest to view your entries");
     }
 
     @Transactional
@@ -254,9 +296,12 @@ public class ContestEntryService {
 
         if (!fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
             lockFixtureContestTeamsIfNeeded(fixtureId);
+            markPublicContestsLiveIfStarted(fixtureId);
         }
 
-        return cricketFantasyScoringService.syncFixtureFantasyPoints(fixtureId, force);
+        Map<String, Object> result = cricketFantasyScoringService.syncFixtureFantasyPoints(fixtureId, force);
+        finalizeFixtureContestsIfNeeded(fixtureId);
+        return result;
     }
 
     @Transactional
@@ -367,7 +412,15 @@ public class ContestEntryService {
     public List<ContestEntryResponse> getMyEntries(Long userId, Long contestId) {
         Contest contest = contestRepository.findById(contestId)
                 .orElseThrow(() -> new RuntimeException("Contest not found"));
-        syncFixtureFantasyPointsIfNeeded(contest, false);
+        try {
+            syncFixtureFantasyPointsIfNeeded(contest, false);
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Skipping contest entry sync for contest {} due to sync issue: {}",
+                    contestId,
+                    ex.getMessage()
+            );
+        }
 
         List<ContestEntry> entries = contestEntryRepository.findByContestIdAndUserIdOrderByJoinedAtAsc(contestId, userId);
         List<ContestEntryResponse> response = new ArrayList<>();
@@ -387,7 +440,15 @@ public class ContestEntryService {
         for (ContestEntry entry : entries) {
             contestRepository.findById(entry.getContestId()).ifPresent(contest -> {
                 if (syncedFixtureIds.add(contest.getFixtureId())) {
-                    syncFixtureFantasyPointsIfNeeded(contest, false);
+                    try {
+                        syncFixtureFantasyPointsIfNeeded(contest, false);
+                    } catch (RuntimeException ex) {
+                        log.warn(
+                                "Skipping contest history sync for contest {} due to sync issue: {}",
+                                contest.getId(),
+                                ex.getMessage()
+                        );
+                    }
                 }
             });
             response.add(mapContestEntry(entry));
@@ -411,10 +472,19 @@ public class ContestEntryService {
                 .build();
     }
 
-    public List<LeaderboardEntryResponse> getLeaderboard(Long contestId) {
+    public List<LeaderboardEntryResponse> getLeaderboard(Long contestId, Long viewerUserId) {
         Contest contest = contestRepository.findById(contestId)
                 .orElseThrow(() -> new RuntimeException("Contest not found"));
-        syncFixtureFantasyPointsIfNeeded(contest, false);
+        ensureContestViewerAllowed(contest, viewerUserId);
+        try {
+            syncFixtureFantasyPointsIfNeeded(contest, false);
+        } catch (RuntimeException ex) {
+            log.warn(
+                    "Skipping live leaderboard sync for contest {} due to sync issue: {}",
+                    contestId,
+                    ex.getMessage()
+            );
+        }
 
         List<ContestEntry> entries = new ArrayList<>(contestEntryRepository.findByContestIdOrderByJoinedAtAsc(contestId));
 
@@ -461,6 +531,34 @@ public class ContestEntryService {
         return response;
     }
 
+    public TeamResponse getContestTeamView(Long viewerUserId, Long contestId, Long teamId) {
+        Contest contest = contestRepository.findById(contestId)
+                .orElseThrow(() -> new RuntimeException("Contest not found"));
+        ensureContestViewerAllowed(contest, viewerUserId);
+
+        if (!contestEntryRepository.existsByContestIdAndUserId(contestId, viewerUserId)) {
+            throw new RuntimeException("Join this contest to view participant teams");
+        }
+
+        Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
+                .orElseThrow(() -> new RuntimeException("Fixture not found"));
+
+        if (!hasFixtureStarted(fixture)) {
+            throw new RuntimeException("Participant teams become visible only after the match starts");
+        }
+
+        contestEntryRepository.findByContestIdAndUserMatchTeamId(contestId, teamId)
+                .orElseThrow(() -> new RuntimeException("This team is not part of the contest"));
+
+        TeamResponse team = teamService.getTeamById(teamId);
+        try {
+            return cricketFantasyScoringService.populateFantasyPointsForTeamPreview(fixture.getId(), team);
+        } catch (RuntimeException ex) {
+            log.warn("Unable to enrich contest team preview with fantasy points for team {}", teamId, ex);
+            return team;
+        }
+    }
+
     private ContestPrize findPrizeForRank(List<ContestPrize> prizes, int rank) {
         for (ContestPrize prize : prizes) {
             if (rank >= prize.getRankFromNo() && rank <= prize.getRankToNo()) {
@@ -468,6 +566,17 @@ public class ContestEntryService {
             }
         }
         return null;
+    }
+
+    private boolean hasFixtureStarted(Fixture fixture) {
+        LocalDateTime now = LocalDateTime.now();
+        if (fixture.getDeadlineTime() != null) {
+            return !fixture.getDeadlineTime().isAfter(now);
+        }
+        if (fixture.getStartTime() != null) {
+            return !fixture.getStartTime().isAfter(now);
+        }
+        return false;
     }
 
     private void validateOptionalRoom(Long userId, Long roomId, Long fixtureSportId) {
@@ -509,15 +618,33 @@ public class ContestEntryService {
                 .build();
     }
 
-    private Contest findCommunityContest(Long roomId) {
-        Contest contest = contestRepository.findByRoomId(roomId)
-                .orElseThrow(() -> new RuntimeException("Community contest not found"));
+    private Long validateCommunityContestMembership(Long userId, Contest contest, Long fixtureSportId) {
+        Long roomId = validateCommunityContestAccess(userId, contest, fixtureSportId);
+        validateCommunityJoinAllowed(contest);
+        return roomId;
+    }
 
-        if (contest.getContestType() != Contest.ContestType.COMMUNITY) {
-            throw new RuntimeException("This community is not configured as a community contest");
+    private Long validateCommunityContestAccess(Long userId, Contest contest, Long fixtureSportId) {
+        Long roomId = contest.getRoomId();
+        if (roomId == null) {
+            throw new RuntimeException("Community contest is missing its community");
         }
 
-        return contest;
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new RuntimeException("Community not found"));
+
+        if (room.getStatus() != Room.Status.ACTIVE) {
+            throw new RuntimeException("Community is not active");
+        }
+
+        if (!Objects.equals(room.getSportId(), fixtureSportId)) {
+            throw new RuntimeException("Community sport does not match fixture sport");
+        }
+
+        roomMemberRepository.findByRoomIdAndUserId(roomId, userId)
+                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
+                .orElseThrow(() -> new RuntimeException("You are not a member of this community"));
+        return roomId;
     }
 
     private void validateCommunityJoinAllowed(Contest contest) {
@@ -542,15 +669,22 @@ public class ContestEntryService {
     private void updateCommunityPrizeState(Contest contest) {
         int activeEntries = contestEntryRepository.findByContestIdOrderByJoinedAtAsc(contest.getId()).size();
         int prizePoolPoints = activeEntries * contest.getEntryFeePoints();
-        int payoutPoints = calculateCommunityWinnerPayout(prizePoolPoints);
+        List<ContestPrize> prizes = buildCommunityPrizes(contest.getId(), prizePoolPoints, contest.getWinnerCount());
+        int firstPrizePoints = prizes.isEmpty() ? 0 : prizes.getFirst().getPrizePoints();
 
         contest.setSpotsFilled(activeEntries);
         contest.setPrizePoolPoints(prizePoolPoints);
-        contest.setFirstPrizePoints(payoutPoints);
-        contest.setWinnerCount(1);
+        contest.setFirstPrizePoints(firstPrizePoints);
         contest.setJoinConfirmRequired(false);
-        contest.setStatus(activeEntries >= contest.getMaxSpots() ? Contest.Status.FULL : Contest.Status.OPEN);
+        if (contest.getStatus() != Contest.Status.CANCELLED && contest.getStatus() != Contest.Status.COMPLETED) {
+            contest.setStatus(activeEntries >= contest.getMaxSpots() ? Contest.Status.FULL : Contest.Status.OPEN);
+        }
         contestRepository.save(contest);
+
+        contestPrizeRepository.deleteByContestId(contest.getId());
+        if (!prizes.isEmpty()) {
+            contestPrizeRepository.saveAll(prizes);
+        }
     }
 
     private void syncCommunityContestState(Contest contest) {
@@ -578,27 +712,44 @@ public class ContestEntryService {
 
         List<ContestEntry> entries = new ArrayList<>(contestEntryRepository.findByContestIdOrderByJoinedAtAsc(contest.getId()));
 
-        if (entries.size() == 1 && Objects.equals(entries.getFirst().getUserId(), contest.getCreatedByUserId())) {
-            ContestEntry creatorEntry = entries.getFirst();
+        if (entries.size() <= 1) {
+            LocalDateTime now = LocalDateTime.now();
+            List<Notification> refundNotifications = new ArrayList<>();
+            Set<Long> notifiedUserIds = new HashSet<>();
+            for (ContestEntry entry : entries) {
+                if (entry.getStatus() == ContestEntry.Status.JOINED) {
+                    entry.setStatus(ContestEntry.Status.REFUNDED);
+                    entry.setPrizePointsAwarded(0);
+                    entry.setSettledAt(now);
+                    contestEntryRepository.save(entry);
 
-            if (creatorEntry.getStatus() == ContestEntry.Status.JOINED) {
-                creatorEntry.setStatus(ContestEntry.Status.REFUNDED);
-                creatorEntry.setPrizePointsAwarded(0);
-                creatorEntry.setSettledAt(LocalDateTime.now());
-                contestEntryRepository.save(creatorEntry);
+                    walletService.creditRefund(
+                            entry.getUserId(),
+                            entry.getEntryFeePoints(),
+                            contest.getId(),
+                            "Community contest refund - not enough members joined"
+                    );
 
-                walletService.creditRefund(
-                        creatorEntry.getUserId(),
-                        creatorEntry.getEntryFeePoints(),
-                        contest.getId(),
-                        "Community refund - no other members joined"
-                );
+                    if (notifiedUserIds.add(entry.getUserId())) {
+                        refundNotifications.add(Notification.builder()
+                                .userId(entry.getUserId())
+                                .type("COMMUNITY_CONTEST_CANCELLED")
+                                .title("Contest Cancelled")
+                                .body(contest.getContestName() + " was cancelled and your points were refunded.")
+                                .payloadJson("{\"communityId\":" + contest.getRoomId()
+                                        + ",\"contestId\":" + contest.getId()
+                                        + ",\"reason\":\"NOT_ENOUGH_MEMBERS\"}")
+                                .isRead(false)
+                                .build());
+                    }
+                }
             }
 
             contest.setPrizePoolPoints(0);
             contest.setFirstPrizePoints(0);
             contest.setStatus(Contest.Status.CANCELLED);
             contestRepository.save(contest);
+            notificationService.createNotifications(refundNotifications);
             return;
         }
 
@@ -646,6 +797,65 @@ public class ContestEntryService {
         sendCommunityCancelledNotifications(contest, fixture, entries);
     }
 
+    private void cancelCommunityContestForRoomClosure(Contest contest, String roomName) {
+        if (contest.getStatus() == Contest.Status.CANCELLED || contest.getStatus() == Contest.Status.COMPLETED) {
+            return;
+        }
+
+        List<ContestEntry> entries = new ArrayList<>(contestEntryRepository.findByContestIdOrderByJoinedAtAsc(contest.getId()));
+        LocalDateTime now = LocalDateTime.now();
+
+        for (ContestEntry entry : entries) {
+            entry.setRankNo(null);
+            entry.setPrizePointsAwarded(0);
+
+            if (entry.getStatus() == ContestEntry.Status.JOINED) {
+                entry.setStatus(ContestEntry.Status.REFUNDED);
+                entry.setSettledAt(now);
+                walletService.creditRefund(
+                        entry.getUserId(),
+                        entry.getEntryFeePoints(),
+                        contest.getId(),
+                        "Community contest refund - " + roomName + " was deleted"
+                );
+            } else if (entry.getSettledAt() == null) {
+                entry.setSettledAt(now);
+            }
+
+            contestEntryRepository.save(entry);
+        }
+
+        contest.setPrizePoolPoints(0);
+        contest.setFirstPrizePoints(0);
+        contest.setStatus(Contest.Status.CANCELLED);
+        contestRepository.save(contest);
+
+        if (!entries.isEmpty()) {
+            List<Notification> notifications = new ArrayList<>();
+            Set<Long> notifiedUserIds = new HashSet<>();
+            String payload = "{\"communityId\":" + contest.getRoomId()
+                    + ",\"contestId\":" + contest.getId()
+                    + ",\"reason\":\"COMMUNITY_DELETED\"}";
+
+            for (ContestEntry entry : entries) {
+                if (!notifiedUserIds.add(entry.getUserId())) {
+                    continue;
+                }
+
+                notifications.add(Notification.builder()
+                        .userId(entry.getUserId())
+                        .type("COMMUNITY_CONTEST_CANCELLED")
+                        .title("Community Deleted")
+                        .body("A contest in " + roomName + " was cancelled and your points were refunded.")
+                        .payloadJson(payload)
+                        .isRead(false)
+                        .build());
+            }
+
+            notificationService.createNotifications(notifications);
+        }
+    }
+
     private void sendCommunityCancelledNotifications(
             Contest contest,
             Fixture fixture,
@@ -677,9 +887,7 @@ public class ContestEntryService {
                     .build());
         }
 
-        if (!notifications.isEmpty()) {
-            notificationRepository.saveAll(notifications);
-        }
+        notificationService.createNotifications(notifications);
     }
 
     private boolean isFixtureCancelledStatus(String status) {
@@ -695,6 +903,21 @@ public class ContestEntryService {
                 || compact.contains("ABANDON")
                 || compact.equals("NORESULT")
                 || compact.equals("NR");
+    }
+
+    private void ensureContestViewerAllowed(Contest contest, Long viewerUserId) {
+        if (contest.getContestType() != Contest.ContestType.COMMUNITY) {
+            return;
+        }
+
+        Long roomId = contest.getRoomId();
+        if (roomId == null) {
+            throw new RuntimeException("Community contest is missing its community");
+        }
+
+        roomMemberRepository.findByRoomIdAndUserId(roomId, viewerUserId)
+                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
+                .orElseThrow(() -> new RuntimeException("You are not a member of this community"));
     }
 
     private Map<String, Object> settleCommunityContest(Contest contest) {
@@ -731,7 +954,11 @@ public class ContestEntryService {
         }
 
         int totalCollected = entries.size() * contest.getEntryFeePoints();
-        int winnerPayout = calculateCommunityWinnerPayout(totalCollected);
+        List<ContestPrize> prizes = contestPrizeRepository.findByContestIdOrderByRankFromNoAsc(contest.getId());
+        if (prizes.isEmpty()) {
+            prizes = buildCommunityPrizes(contest.getId(), totalCollected, contest.getWinnerCount());
+        }
+        int firstPrizePoints = prizes.isEmpty() ? 0 : prizes.getFirst().getPrizePoints();
 
         List<ContestEntry> eligibleEntries = entries.stream()
                 .filter(entry -> entry.getUserMatchTeamId() != null)
@@ -767,17 +994,19 @@ public class ContestEntryService {
             rankedEntryIds.add(entry.getId());
             entry.setRankNo(rank);
 
-            if (rank == 1) {
-                entry.setPrizePointsAwarded(winnerPayout);
+            ContestPrize matchedPrize = findPrizeForRank(prizes, rank);
+            if (matchedPrize != null && matchedPrize.getPrizePoints() > 0) {
+                int prizePoints = matchedPrize.getPrizePoints();
+                entry.setPrizePointsAwarded(prizePoints);
                 walletService.creditContestWin(
                         entry.getUserId(),
-                        winnerPayout,
+                        prizePoints,
                         contest.getId(),
-                        "Community win - rank 1"
+                        "Community win - rank " + rank
                 );
-                userStatsService.recordContestWin(entry.getUserId(), winnerPayout, 1);
-                winnersCredited = 1;
-                totalPrizeCredited = winnerPayout;
+                userStatsService.recordContestWin(entry.getUserId(), prizePoints, rank);
+                winnersCredited++;
+                totalPrizeCredited += prizePoints;
             } else {
                 entry.setPrizePointsAwarded(0);
             }
@@ -801,7 +1030,7 @@ public class ContestEntryService {
         }
 
         contest.setPrizePoolPoints(totalCollected);
-        contest.setFirstPrizePoints(winnerPayout);
+        contest.setFirstPrizePoints(firstPrizePoints);
         contest.setStatus(Contest.Status.COMPLETED);
         contestRepository.save(contest);
 
@@ -812,6 +1041,49 @@ public class ContestEntryService {
                 totalPrizeCredited,
                 contest.getStatus().name()
         );
+    }
+
+    private List<ContestPrize> buildCommunityPrizes(Long contestId, int totalCollected, Integer winnerCount) {
+        int normalizedWinnerCount = winnerCount == null || winnerCount < 1 ? 1 : Math.min(winnerCount, 3);
+        int payoutPoints = calculateCommunityWinnerPayout(totalCollected);
+        List<Integer> percentages = switch (normalizedWinnerCount) {
+            case 2 -> List.of(60, 40);
+            case 3 -> List.of(50, 30, 20);
+            default -> List.of(100);
+        };
+        List<Integer> prizePoints = splitPointsByPercentages(payoutPoints, percentages);
+
+        List<ContestPrize> prizes = new ArrayList<>();
+        for (int index = 0; index < prizePoints.size(); index++) {
+            prizes.add(ContestPrize.builder()
+                    .contestId(contestId)
+                    .rankFromNo(index + 1)
+                    .rankToNo(index + 1)
+                    .prizePoints(prizePoints.get(index))
+                    .build());
+        }
+        return prizes;
+    }
+
+    private List<Integer> splitPointsByPercentages(int totalPoints, List<Integer> percentages) {
+        List<Integer> split = new ArrayList<>();
+        int allocated = 0;
+
+        for (Integer percentage : percentages) {
+            int points = totalPoints * percentage / 100;
+            split.add(points);
+            allocated += points;
+        }
+
+        int remainder = totalPoints - allocated;
+        int index = 0;
+        while (remainder > 0 && !split.isEmpty()) {
+            split.set(index, split.get(index) + 1);
+            remainder--;
+            index = (index + 1) % split.size();
+        }
+
+        return split;
     }
 
     private int calculateCommunityWinnerPayout(int prizePoolPoints) {
@@ -834,6 +1106,54 @@ public class ContestEntryService {
     private void lockFixtureContestTeamsIfNeeded(Long fixtureId) {
         for (Contest contest : contestRepository.findByFixtureIdOrderByEntryFeePointsAscIdAsc(fixtureId)) {
             lockContestTeamsIfNeeded(contest);
+        }
+    }
+
+    private void markPublicContestsLiveIfStarted(Long fixtureId) {
+        List<Contest> contests = contestRepository.findByFixtureIdOrderByEntryFeePointsAscIdAsc(fixtureId);
+        List<Contest> updatable = new ArrayList<>();
+
+        for (Contest contest : contests) {
+            if (contest.getContestType() != Contest.ContestType.PUBLIC) {
+                continue;
+            }
+
+            if (contest.getStatus() == Contest.Status.OPEN || contest.getStatus() == Contest.Status.FULL) {
+                contest.setStatus(Contest.Status.LIVE);
+                updatable.add(contest);
+            }
+        }
+
+        if (!updatable.isEmpty()) {
+            contestRepository.saveAll(updatable);
+        }
+    }
+
+    private void finalizeFixtureContestsIfNeeded(Long fixtureId) {
+        Fixture fixture = fixtureRepository.findById(fixtureId).orElse(null);
+        if (fixture == null) {
+            return;
+        }
+
+        if (isFixtureCancelledStatus(fixture.getStatus())) {
+            syncCancelledFixtureCommunityContests(fixtureId);
+            return;
+        }
+
+        if (!isFixtureFinishedStatus(fixture.getStatus())) {
+            return;
+        }
+
+        for (Contest contest : contestRepository.findByFixtureIdOrderByEntryFeePointsAscIdAsc(fixtureId)) {
+            if (contest.getStatus() == Contest.Status.CANCELLED || contest.getStatus() == Contest.Status.COMPLETED) {
+                continue;
+            }
+
+            if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
+                settleCommunityContest(contest, false);
+            } else {
+                settlePublicContest(contest, false);
+            }
         }
     }
 

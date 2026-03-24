@@ -5,8 +5,7 @@ import com.friendsfantasy.fantasybackend.auth.repository.UserRepository;
 import com.friendsfantasy.fantasybackend.friend.dto.*;
 import com.friendsfantasy.fantasybackend.friend.entity.FriendRequest;
 import com.friendsfantasy.fantasybackend.friend.repository.FriendRequestRepository;
-import com.friendsfantasy.fantasybackend.notification.entity.Notification;
-import com.friendsfantasy.fantasybackend.notification.repository.NotificationRepository;
+import com.friendsfantasy.fantasybackend.notification.service.NotificationService;
 import com.friendsfantasy.fantasybackend.stats.entity.UserStats;
 import com.friendsfantasy.fantasybackend.stats.service.UserStatsService;
 import lombok.RequiredArgsConstructor;
@@ -23,7 +22,7 @@ public class FriendService {
     private final FriendRequestRepository friendRequestRepository;
     private final UserRepository userRepository;
     private final UserStatsService userStatsService;
-    private final NotificationRepository notificationRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public FriendRequestResponse sendFriendRequest(Long currentUserId, SendFriendRequestRequest request) {
@@ -291,16 +290,7 @@ public class FriendService {
     }
 
     private void createNotification(Long userId, String type, String title, String body, String payloadJson) {
-        Notification notification = Notification.builder()
-                .userId(userId)
-                .type(type)
-                .title(title)
-                .body(body)
-                .payloadJson(payloadJson)
-                .isRead(false)
-                .build();
-
-        notificationRepository.save(notification);
+        notificationService.createNotification(userId, type, title, body, payloadJson);
     }
 
     private String maskMobile(String mobile) {

@@ -1,0 +1,15 @@
+2025/10/16-10:53:10.164 26f4 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.flipkart.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/10/16-10:53:10.165 26f4 Recovering log #4
+2025/10/16-10:53:10.165 26f4 Reusing old log C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.flipkart.com_0.indexeddb.leveldb/000004.log 
+2025/10/16-10:53:20.061 1b04 Level-0 table #8: started
+2025/10/16-10:53:20.063 1b04 Level-0 table #8: 1261 bytes OK
+2025/10/16-10:53:20.065 1b04 Delete type=0 #4
+2025/10/16-10:53:20.065 1b04 Manual compaction at level-0 from (begin) .. (end); will stop at (end)
+2025/10/16-10:53:20.065 1b04 Manual compaction at level-1 from (begin) .. (end); will stop at '\x00\x02\x01\x02\x01\x14\x00c\x00l\x00i\x00e\x00n\x00t\x00S\x00e\x00s\x00s\x00i\x00o\x00n\x00D\x00e\x00s\x00k\x00t\x00o\x00p' @ 493 : 1
+2025/10/16-10:53:20.066 1b04 Compacting 1@1 + 1@2 files
+2025/10/16-10:53:20.069 1b04 Generated table #9@1: 94 keys, 116991 bytes
+2025/10/16-10:53:20.069 1b04 Compacted 1@1 + 1@2 files => 116991 bytes
+2025/10/16-10:53:20.071 1b04 compacted to: files[ 0 0 1 0 0 0 0 ]
+2025/10/16-10:53:20.071 1b04 Delete type=2 #5
+2025/10/16-10:53:20.071 1b04 Delete type=2 #8
+2025/10/16-10:53:20.072 1b04 Manual compaction at level-1 from '\x00\x02\x01\x02\x01\x14\x00c\x00l\x00i\x00e\x00n\x00t\x00S\x00e\x00s\x00s\x00i\x00o\x00n\x00D\x00e\x00s\x00k\x00t\x00o\x00p' @ 493 : 1 .. (end); will stop at (end)

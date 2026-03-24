@@ -13,6 +13,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.test.util.ReflectionTestUtils;
 import tools.jackson.databind.ObjectMapper;
@@ -97,12 +98,53 @@ class FixtureSyncServiceTest {
 
         when(fixtureRepository.findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(eq(1L), any(LocalDateTime.class)))
                 .thenReturn(List.of(fixture), List.of(fixture));
-        when(fixtureParticipantRepository.findByFixtureIdOrderByIsHomeDescTeamNameAsc(99L)).thenReturn(List.of());
+        when(fixtureParticipantRepository.findByFixtureIdInOrderByFixtureIdAscIsHomeDescTeamNameAsc(List.of(99L)))
+                .thenReturn(List.of());
         doReturn(0).when(spyService).syncUpcomingFixtures();
 
         assertThat(spyService.getUpcomingFixtures()).hasSize(1);
 
         verify(spyService).syncUpcomingFixtures();
+    }
+
+    @Test
+    void getUpcomingFixturesWithLimitUsesPagedFixtureQuery() {
+        ReflectionTestUtils.setField(fixtureSyncService, "syncOnReadEnabled", false);
+
+        Fixture first = Fixture.builder()
+                .id(11L)
+                .sportId(1L)
+                .externalFixtureId(5001L)
+                .title("Team A vs Team B")
+                .status("NS")
+                .startTime(LocalDateTime.now().plusHours(2))
+                .deadlineTime(LocalDateTime.now().plusHours(2))
+                .build();
+        Fixture second = Fixture.builder()
+                .id(12L)
+                .sportId(1L)
+                .externalFixtureId(5002L)
+                .title("Team C vs Team D")
+                .status("NS")
+                .startTime(LocalDateTime.now().plusHours(3))
+                .deadlineTime(LocalDateTime.now().plusHours(3))
+                .build();
+
+        when(fixtureRepository.findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(
+                eq(1L),
+                any(LocalDateTime.class),
+                any(Pageable.class)
+        )).thenReturn(List.of(first, second));
+        when(fixtureParticipantRepository.findByFixtureIdInOrderByFixtureIdAscIsHomeDescTeamNameAsc(List.of(11L, 12L)))
+                .thenReturn(List.of());
+
+        assertThat(fixtureSyncService.getUpcomingFixtures(2)).hasSize(2);
+
+        verify(fixtureRepository).findBySportIdAndStartTimeGreaterThanEqualOrderByStartTimeAsc(
+                eq(1L),
+                any(LocalDateTime.class),
+                argThat(pageable -> pageable != null && pageable.getPageSize() == 2)
+        );
     }
 
     @Test

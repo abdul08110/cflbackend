@@ -12,4 +12,10 @@ public interface RoomInvitationRepository extends JpaRepository<RoomInvitation, 
     List<RoomInvitation> findByInvitedUserIdAndStatusOrderByCreatedAtDesc(Long invitedUserId, RoomInvitation.Status status);
 
     List<RoomInvitation> findByInvitedMobileAndStatusOrderByCreatedAtDesc(String invitedMobile, RoomInvitation.Status status);
+
+    boolean existsByRoomIdAndInvitedUserIdAndStatus(Long roomId, Long invitedUserId, RoomInvitation.Status status);
+
+    boolean existsByRoomIdAndInvitedMobileAndStatus(Long roomId, String invitedMobile, RoomInvitation.Status status);
+
+    List<RoomInvitation> findByRoomIdAndStatusOrderByCreatedAtDesc(Long roomId, RoomInvitation.Status status);
 }

@@ -1,0 +1,6 @@
+2025/11/14-10:24:07.342 33e8 Creating DB C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.freeconvert.com_0.indexeddb.leveldb since it was missing.
+2025/11/14-10:24:07.357 33e8 Reusing MANIFEST C:\Users\abdul\AppData\Local\Google\Chrome\User Data\Profile 1\IndexedDB\https_www.freeconvert.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/11/14-10:24:32.327 2264 Level-0 table #5: started
+2025/11/14-10:24:32.330 2264 Level-0 table #5: 3566 bytes OK
+2025/11/14-10:24:32.336 2264 Delete type=0 #3
+2025/11/14-10:24:32.336 2264 Manual compaction at level-0 from (begin) .. (end); will stop at (end)

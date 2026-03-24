@@ -10,22 +10,13 @@ import lombok.Data;
 @Data
 public class CreateRoomRequest {
 
-    @NotNull
-    private Long fixtureId;
-
     @JsonAlias("roomName")
     @NotBlank
     private String communityName;
 
-    private Boolean isPrivate = true;
-
     @JsonAlias("maxMembers")
     @NotNull
     @Min(2)
-    @Max(20)
+    @Max(30)
     private Integer maxSpots = 20;
-
-    @NotNull
-    @Min(1)
-    private Integer joiningPoints;
 }

@@ -1,6 +1,7 @@
 package com.friendsfantasy.fantasybackend.user.controller;
 
 import com.friendsfantasy.fantasybackend.auth.entity.User;
+import com.friendsfantasy.fantasybackend.auth.entity.UserProfile;
 import com.friendsfantasy.fantasybackend.auth.service.AuthService;
 import com.friendsfantasy.fantasybackend.common.ApiResponse;
 import com.friendsfantasy.fantasybackend.security.UserPrincipal;
@@ -23,11 +24,14 @@ public class UserController {
     @GetMapping("/me")
     public ApiResponse<Map<String, Object>> getMe(@AuthenticationPrincipal UserPrincipal principal) {
         User user = authService.getById(principal.getId());
+        UserProfile profile = authService.getProfileByUserId(principal.getId()).orElse(null);
 
         return ApiResponse.ok("User fetched successfully", Map.of(
                 "userId", user.getId(),
                 "username", user.getUsername(),
+                "fullName", profile != null ? profile.getFullName() : user.getUsername(),
                 "mobile", user.getMobile(),
+                "email", user.getEmail(),
                 "status", user.getStatus(),
                 "mobileVerified", user.getMobileVerified(),
                 "biometricEnabled", user.getBiometricEnabled()

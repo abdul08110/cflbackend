@@ -15,16 +15,20 @@ public class RoomSummaryResponse {
     private Long sportId;
     @JsonProperty("createdBy")
     private Long createdByUserId;
+    private String createdByUsername;
     private String communityName;
     private String communityCode;
     private Boolean isPrivate;
     private Integer maxSpots;
     private Long joinedMembers;
+    private Integer contestCount;
     private Integer joiningPoints;
     private Integer prizePoolPoints;
     private Integer winnerPayoutPoints;
     private String myRole;
     private String status;
+    private Boolean isMember;
+    private Boolean isInvited;
     private String contestStatus;
     private String fixtureStatus;
     private String fixtureTitle;
@@ -34,4 +38,6 @@ public class RoomSummaryResponse {
     private Boolean canCreateTeam;
     private Boolean canInvite;
     private Boolean canViewParticipantTeams;
+    private Boolean canEdit;
+    private Boolean canDelete;
 }

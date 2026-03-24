@@ -7,10 +7,13 @@ import com.friendsfantasy.fantasybackend.contest.repository.ContestPrizeReposito
 import com.friendsfantasy.fantasybackend.contest.repository.ContestRepository;
 import com.friendsfantasy.fantasybackend.fixture.entity.Fixture;
 import com.friendsfantasy.fantasybackend.fixture.repository.FixtureRepository;
+import com.friendsfantasy.fantasybackend.room.entity.RoomMember;
+import com.friendsfantasy.fantasybackend.room.repository.RoomMemberRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -22,11 +25,16 @@ public class ContestService {
     private final ContestRepository contestRepository;
     private final ContestPrizeRepository contestPrizeRepository;
     private final FixtureRepository fixtureRepository;
+    private final RoomMemberRepository roomMemberRepository;
 
     @Transactional
     public ContestResponse createContest(Long fixtureId, CreateContestRequest request) {
         Fixture fixture = fixtureRepository.findById(fixtureId)
                 .orElseThrow(() -> new RuntimeException("Fixture not found"));
+
+        if (fixture.getDeadlineTime() == null || !fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
+            throw new RuntimeException("Contest creation is closed for this fixture");
+        }
 
         validateContestRequest(request);
 
@@ -67,6 +75,12 @@ public class ContestService {
 
         if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
             throw new RuntimeException("Community contests cannot be updated from admin");
+        }
+
+        Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
+                .orElseThrow(() -> new RuntimeException("Fixture not found"));
+        if (fixture.getDeadlineTime() == null || !fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
+            throw new RuntimeException("Contest update is closed for this fixture");
         }
 
         validateContestRequest(request);
@@ -126,24 +140,30 @@ public class ContestService {
         return mapContest(contest);
     }
 
-    private ContestResponse mapContest(Contest contest) {
-        List<ContestPrizeResponse> prizes;
+    public ContestResponse getContest(Long contestId, Long viewerUserId) {
+        Contest contest = contestRepository.findById(contestId)
+                .orElseThrow(() -> new RuntimeException("Contest not found"));
 
-        if (contest.getContestType() == Contest.ContestType.COMMUNITY) {
+        ensureViewerAllowed(contest, viewerUserId);
+        return mapContest(contest);
+    }
+
+    private ContestResponse mapContest(Contest contest) {
+        List<ContestPrizeResponse> prizes = contestPrizeRepository.findByContestIdOrderByRankFromNoAsc(contest.getId())
+                .stream()
+                .map(p -> ContestPrizeResponse.builder()
+                        .rankFrom(p.getRankFromNo())
+                        .rankTo(p.getRankToNo())
+                        .prizePoints(p.getPrizePoints())
+                        .build())
+                .toList();
+
+        if (prizes.isEmpty() && contest.getFirstPrizePoints() != null) {
             prizes = List.of(ContestPrizeResponse.builder()
                     .rankFrom(1)
                     .rankTo(1)
                     .prizePoints(contest.getFirstPrizePoints())
                     .build());
-        } else {
-            prizes = contestPrizeRepository.findByContestIdOrderByRankFromNoAsc(contest.getId())
-                    .stream()
-                    .map(p -> ContestPrizeResponse.builder()
-                            .rankFrom(p.getRankFromNo())
-                            .rankTo(p.getRankToNo())
-                            .prizePoints(p.getPrizePoints())
-                            .build())
-                    .toList();
         }
 
         int spotsLeft = Math.max(0, contest.getMaxSpots() - contest.getSpotsFilled());
@@ -167,6 +187,21 @@ public class ContestService {
                 .build();
     }
 
+    private void ensureViewerAllowed(Contest contest, Long viewerUserId) {
+        if (contest.getContestType() != Contest.ContestType.COMMUNITY) {
+            return;
+        }
+
+        Long roomId = contest.getRoomId();
+        if (roomId == null) {
+            throw new RuntimeException("Community contest is missing its community");
+        }
+
+        roomMemberRepository.findByRoomIdAndUserId(roomId, viewerUserId)
+                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
+                .orElseThrow(() -> new RuntimeException("You are not a member of this community"));
+    }
+
     private void savePrizes(Long contestId, List<ContestPrizeRequest> prizes) {
         for (ContestPrizeRequest prize : prizes) {
             ContestPrize entity = ContestPrize.builder()
@@ -184,6 +219,8 @@ public class ContestService {
         if (request.getPrizes() == null || request.getPrizes().isEmpty()) {
             throw new RuntimeException("Prize breakup is required");
         }
+
+        validateWinnerStructure(request.getWinnerCount(), request.getMaxSpots());
 
         List<ContestPrizeRequest> prizes = new ArrayList<>(request.getPrizes());
         prizes.sort(Comparator.comparingInt(ContestPrizeRequest::getRankFrom));
@@ -217,6 +254,36 @@ public class ContestService {
 
         if (request.getMaxSpots() < request.getWinnerCount()) {
             throw new RuntimeException("maxSpots cannot be less than winnerCount");
+        }
+    }
+
+    private void validateWinnerStructure(Integer winnerCount, Integer maxSpots) {
+        if (winnerCount == null || winnerCount < 1 || winnerCount > 3) {
+            throw new RuntimeException("winnerCount must be 1, 2, or 3");
+        }
+
+        if (maxSpots == null) {
+            throw new RuntimeException("maxSpots is required");
+        }
+
+        int minSpots = switch (winnerCount) {
+            case 1 -> 2;
+            case 2 -> 5;
+            case 3 -> 10;
+            default -> 2;
+        };
+        int maxAllowedSpots = switch (winnerCount) {
+            case 1 -> 10;
+            case 2 -> 20;
+            case 3 -> 30;
+            default -> 10;
+        };
+
+        if (maxSpots < minSpots || maxSpots > maxAllowedSpots) {
+            throw new RuntimeException(
+                    "maxSpots must be between " + minSpots + " and " + maxAllowedSpots
+                            + " when winnerCount is " + winnerCount
+            );
         }
     }
 }

@@ -22,6 +22,13 @@ public class RoomController {
 
     private final RoomService roomService;
 
+    @GetMapping
+    public ApiResponse<List<RoomSummaryResponse>> getAllRooms(
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        return ApiResponse.ok("Communities fetched successfully", roomService.getAllRooms(principal.getId()));
+    }
+
     @PostMapping
     public ApiResponse<RoomSummaryResponse> createRoom(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -45,6 +52,18 @@ public class RoomController {
         return ApiResponse.ok("Community fetched successfully", roomService.getRoomDetails(roomId, principal.getId()));
     }
 
+    @PutMapping("/{roomId}")
+    public ApiResponse<RoomSummaryResponse> updateRoom(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long roomId,
+            @Valid @RequestBody UpdateRoomRequest request
+    ) {
+        return ApiResponse.ok(
+                "Community updated successfully",
+                roomService.updateRoom(principal.getId(), roomId, request)
+        );
+    }
+
     @GetMapping("/{roomId}/members")
     public ApiResponse<List<RoomMemberResponse>> getRoomMembers(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -65,6 +84,17 @@ public class RoomController {
         );
     }
 
+    @DeleteMapping("/{roomId}")
+    public ApiResponse<Map<String, Object>> deleteRoom(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long roomId
+    ) {
+        return ApiResponse.ok(
+                "Community deleted successfully",
+                roomService.deleteRoom(principal.getId(), roomId)
+        );
+    }
+
     @PostMapping("/join-by-code")
     public ApiResponse<RoomSummaryResponse> joinByCode(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -81,6 +111,31 @@ public class RoomController {
     ) {
         return ApiResponse.ok("Community invitation sent successfully",
                 roomService.inviteToRoom(principal.getId(), roomId, request));
+    }
+
+    @PostMapping("/{roomId}/contests")
+    public ApiResponse<RoomAvailableContestResponse> createCommunityContest(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long roomId,
+            @Valid @RequestBody CreateCommunityContestRequest request
+    ) {
+        return ApiResponse.ok(
+                "Community contest created successfully",
+                roomService.createCommunityContest(principal.getId(), roomId, request)
+        );
+    }
+
+    @PostMapping("/{roomId}/contests/{contestId}/invite")
+    public ApiResponse<Map<String, Object>> inviteToCommunityContest(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long roomId,
+            @PathVariable Long contestId,
+            @RequestBody InviteToCommunityContestRequest request
+    ) {
+        return ApiResponse.ok(
+                "Community contest invitation sent successfully",
+                roomService.inviteToCommunityContest(principal.getId(), roomId, contestId, request)
+        );
     }
 
     @PostMapping("/{roomId}/team")

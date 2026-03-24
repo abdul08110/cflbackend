@@ -194,7 +194,7 @@ public class SportMonksCricketClient {
                 .uri(uriBuilder -> uriBuilder
                         .path("/fixtures/{id}")
                         .queryParam("api_token", apiToken)
-                        .queryParam("include", "localteam,visitorteam,lineup")
+                        .queryParam("include", "localteam,visitorteam,lineup,lineup.position")
                         .build(externalFixtureId))
                 .retrieve()
                 .body(String.class);

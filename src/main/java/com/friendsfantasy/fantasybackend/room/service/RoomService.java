@@ -2,10 +2,9 @@ package com.friendsfantasy.fantasybackend.room.service;
 
 import com.friendsfantasy.fantasybackend.auth.entity.User;
 import com.friendsfantasy.fantasybackend.auth.repository.UserRepository;
+import com.friendsfantasy.fantasybackend.common.ApiException;
 import com.friendsfantasy.fantasybackend.contest.dto.ContestEntryResponse;
-import com.friendsfantasy.fantasybackend.contest.dto.LeaderboardEntryResponse;
 import com.friendsfantasy.fantasybackend.contest.entity.Contest;
-import com.friendsfantasy.fantasybackend.contest.entity.ContestEntry;
 import com.friendsfantasy.fantasybackend.contest.repository.ContestEntryRepository;
 import com.friendsfantasy.fantasybackend.contest.repository.ContestRepository;
 import com.friendsfantasy.fantasybackend.contest.service.ContestEntryService;
@@ -14,16 +13,20 @@ import com.friendsfantasy.fantasybackend.fixture.entity.FixtureParticipant;
 import com.friendsfantasy.fantasybackend.fixture.repository.FixtureParticipantRepository;
 import com.friendsfantasy.fantasybackend.fixture.repository.FixtureRepository;
 import com.friendsfantasy.fantasybackend.fixture.service.FixtureSnapshotMapper;
-import com.friendsfantasy.fantasybackend.notification.entity.Notification;
-import com.friendsfantasy.fantasybackend.notification.repository.NotificationRepository;
+import com.friendsfantasy.fantasybackend.notification.service.NotificationService;
+import com.friendsfantasy.fantasybackend.room.dto.AvailableContestFixtureParticipantResponse;
+import com.friendsfantasy.fantasybackend.room.dto.CreateCommunityContestRequest;
 import com.friendsfantasy.fantasybackend.room.dto.CreateRoomRequest;
+import com.friendsfantasy.fantasybackend.room.dto.InviteToCommunityContestRequest;
 import com.friendsfantasy.fantasybackend.room.dto.InviteToRoomRequest;
 import com.friendsfantasy.fantasybackend.room.dto.JoinRoomByCodeRequest;
+import com.friendsfantasy.fantasybackend.room.dto.RoomAvailableContestResponse;
 import com.friendsfantasy.fantasybackend.room.dto.RoomDetailResponse;
 import com.friendsfantasy.fantasybackend.room.dto.RoomInvitationResponse;
 import com.friendsfantasy.fantasybackend.room.dto.RoomMemberResponse;
 import com.friendsfantasy.fantasybackend.room.dto.RoomSummaryResponse;
 import com.friendsfantasy.fantasybackend.room.dto.SelectCommunityTeamRequest;
+import com.friendsfantasy.fantasybackend.room.dto.UpdateRoomRequest;
 import com.friendsfantasy.fantasybackend.room.entity.Room;
 import com.friendsfantasy.fantasybackend.room.entity.RoomInvitation;
 import com.friendsfantasy.fantasybackend.room.entity.RoomMember;
@@ -33,8 +36,9 @@ import com.friendsfantasy.fantasybackend.room.repository.RoomRepository;
 import com.friendsfantasy.fantasybackend.stats.service.UserStatsService;
 import com.friendsfantasy.fantasybackend.team.dto.CreateTeamRequest;
 import com.friendsfantasy.fantasybackend.team.dto.TeamResponse;
-import com.friendsfantasy.fantasybackend.team.service.TeamService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +46,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -50,6 +55,7 @@ import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class RoomService {
 
     private static final String CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -58,7 +64,7 @@ public class RoomService {
     private final RoomRepository roomRepository;
     private final RoomMemberRepository roomMemberRepository;
     private final RoomInvitationRepository roomInvitationRepository;
-    private final NotificationRepository notificationRepository;
+    private final NotificationService notificationService;
     private final UserRepository userRepository;
     private final ContestRepository contestRepository;
     private final ContestEntryRepository contestEntryRepository;
@@ -66,27 +72,27 @@ public class RoomService {
     private final FixtureParticipantRepository fixtureParticipantRepository;
     private final ContestEntryService contestEntryService;
     private final FixtureSnapshotMapper fixtureSnapshotMapper;
-    private final TeamService teamService;
     private final UserStatsService userStatsService;
+
+    @Value("${app.cricket-sport-id:1}")
+    private Long cricketSportId;
 
     @Transactional
     public RoomSummaryResponse createRoom(Long userId, CreateRoomRequest request) {
-        validateJoinPoints(request.getJoiningPoints());
+        User currentUser = getUser(userId);
+        String communityName = normalizeCommunityName(request.getCommunityName());
 
-        Fixture fixture = fixtureRepository.findById(request.getFixtureId())
-                .orElseThrow(() -> new RuntimeException("Fixture not found"));
-
-        if (!fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
-            throw new RuntimeException("Community creation is closed for this fixture");
+        if (roomRepository.existsByRoomNameIgnoreCaseAndStatus(communityName, Room.Status.ACTIVE)) {
+            throw ApiException.conflict("Community name already exists");
         }
 
         Room room = Room.builder()
-                .sportId(fixture.getSportId())
-                .fixtureId(fixture.getId())
+                .sportId(cricketSportId)
+                .fixtureId(null)
                 .createdByUserId(userId)
-                .roomName(request.getCommunityName().trim())
+                .roomName(communityName)
                 .roomCode(generateUniqueRoomCode())
-                .isPrivate(Boolean.TRUE.equals(request.getIsPrivate()))
+                .isPrivate(true)
                 .maxMembers(request.getMaxSpots())
                 .status(Room.Status.ACTIVE)
                 .build();
@@ -102,103 +108,145 @@ public class RoomService {
                 .build();
         roomMemberRepository.save(owner);
 
-        Contest contest = Contest.builder()
-                .fixtureId(fixture.getId())
-                .roomId(room.getId())
-                .scoringTemplateId(1L)
-                .contestName(room.getRoomName())
-                .contestType(Contest.ContestType.COMMUNITY)
-                .entryFeePoints(request.getJoiningPoints())
-                .prizePoolPoints(0)
-                .winnerCount(1)
-                .maxSpots(room.getMaxMembers())
-                .spotsFilled(0)
-                .joinConfirmRequired(false)
-                .firstPrizePoints(0)
-                .status(Contest.Status.OPEN)
-                .createdByUserId(userId)
-                .build();
-        contestRepository.save(contest);
-
-        contestEntryService.createCommunityEntry(userId, room.getId());
         userStatsService.recordCommunityCreated(userId);
+        return toRoomSummary(room, currentUser);
+    }
 
-        return toRoomSummary(room, owner.getRole().name(), userId);
+    @Transactional
+    public RoomSummaryResponse updateRoom(Long userId, Long roomId, UpdateRoomRequest request) {
+        User currentUser = getUser(userId);
+        Room room = requireActiveRoom(roomId);
+        requireOwnerMember(roomId, userId, "Only the community owner can edit this community");
+
+        String communityName = normalizeCommunityName(request.getCommunityName());
+        if (roomRepository.existsByRoomNameIgnoreCaseAndStatusAndIdNot(communityName, Room.Status.ACTIVE, roomId)) {
+            throw ApiException.conflict("Community name already exists");
+        }
+
+        long joinedMembers = roomMemberRepository.countByRoomIdAndStatus(roomId, RoomMember.Status.JOINED);
+        int highestContestFill = contestRepository.findByRoomIdOrderByCreatedAtDescIdDesc(roomId).stream()
+                .filter(contest -> contest.getStatus() == Contest.Status.OPEN || contest.getStatus() == Contest.Status.FULL)
+                .map(Contest::getSpotsFilled)
+                .max(Integer::compareTo)
+                .orElse(0);
+
+        int minimumAllowedSpots = (int) Math.max(joinedMembers, highestContestFill);
+        if (request.getMaxSpots() < minimumAllowedSpots) {
+            throw ApiException.conflict("Max spots cannot be lower than current joined members or active contest spots");
+        }
+
+        room.setRoomName(communityName);
+        room.setMaxMembers(request.getMaxSpots());
+        room = roomRepository.save(room);
+        syncOpenCommunityContestCap(room);
+
+        return toRoomSummary(room, currentUser);
+    }
+
+    public List<RoomSummaryResponse> getAllRooms(Long userId) {
+        User currentUser = getUser(userId);
+        return roomRepository.findByStatusOrderByCreatedAtDescIdDesc(Room.Status.ACTIVE)
+                .stream()
+                .map(room -> toRoomSummary(room, currentUser))
+                .toList();
     }
 
     public List<RoomSummaryResponse> getMyRooms(Long userId) {
+        User currentUser = getUser(userId);
         List<RoomMember> memberships = roomMemberRepository
                 .findByUserIdAndStatusOrderByCreatedAtDesc(userId, RoomMember.Status.JOINED);
 
-        List<RoomSummaryResponse> response = new ArrayList<>();
+        Map<Long, RoomSummaryResponse> responseByRoomId = new LinkedHashMap<>();
         for (RoomMember membership : memberships) {
             Room room = roomRepository.findById(membership.getRoomId()).orElse(null);
             if (room == null) {
                 continue;
             }
 
-            contestEntryService.syncCommunityContestState(room.getId());
-            response.add(toRoomSummary(room, membership.getRole().name(), userId));
+            responseByRoomId.putIfAbsent(room.getId(), toRoomSummary(room, currentUser));
         }
 
-        return response;
+        return new ArrayList<>(responseByRoomId.values());
     }
 
     public RoomDetailResponse getRoomDetails(Long roomId, Long userId) {
-        contestEntryService.syncCommunityContestState(roomId);
+        User currentUser = getUser(userId);
+        Room room = requireActiveRoom(roomId);
+        requireJoinedMember(roomId, userId, "You are not a member of this community");
 
-        Room room = roomRepository.findById(roomId)
-                .orElseThrow(() -> new RuntimeException("Community not found"));
-
-        RoomMember myMembership = requireJoinedMember(roomId, userId, "You are not a member of this community");
-        Contest contest = contestRepository.findByRoomId(roomId).orElse(null);
-        ContestEntryResponse myEntry = contestEntryService.getCommunityEntry(userId, roomId);
-        List<LeaderboardEntryResponse> leaderboard = contest != null
-                ? contestEntryService.getLeaderboard(contest.getId())
-                : List.of();
-        Fixture fixture = resolveFixture(room, contest);
-        List<FixtureParticipant> participants = fixture == null
-                ? List.of()
-                : fixtureParticipantRepository.findByFixtureIdOrderByIsHomeDescTeamNameAsc(fixture.getId());
-
-        Map<Long, Boolean> teamCreatedByUser = new HashMap<>();
-        if (contest != null) {
-            for (ContestEntry entry : contestEntryRepository.findByContestIdOrderByJoinedAtAsc(contest.getId())) {
-                teamCreatedByUser.put(entry.getUserId(), entry.getUserMatchTeamId() != null);
-            }
+        try {
+            contestEntryService.syncCommunityContestState(roomId);
+        } catch (Exception ex) {
+            log.warn("Community contest state sync failed for room {}. Returning saved room detail.", roomId, ex);
         }
 
         List<RoomMemberResponse> members = roomMemberRepository
                 .findByRoomIdAndStatusOrderByJoinedAtAsc(roomId, RoomMember.Status.JOINED)
                 .stream()
-                .map(member -> toMemberResponse(member, teamCreatedByUser.getOrDefault(member.getUserId(), false)))
+                .map(this::toMemberResponse)
+                .toList();
+
+        List<RoomAvailableContestResponse> contests = contestRepository.findByRoomIdOrderByCreatedAtDescIdDesc(roomId)
+                .stream()
+                .map(contest -> toRoomContestResponse(contest, room, currentUser))
                 .toList();
 
         return RoomDetailResponse.builder()
-                .community(toRoomSummary(room, myMembership.getRole().name(), userId))
-                .myEntry(myEntry)
-                .fixtureLiveData(fixture == null ? null : fixtureSnapshotMapper.buildLiveData(fixture, participants))
+                .community(toRoomSummary(room, currentUser))
                 .members(members)
-                .leaderboard(leaderboard)
+                .contests(contests)
                 .build();
     }
 
     @Transactional
+    public Map<String, Object> deleteRoom(Long userId, Long roomId) {
+        Room room = requireActiveRoom(roomId);
+        requireOwnerMember(roomId, userId, "Only the community owner can delete this community");
+
+        contestEntryService.cancelCommunityContestsForRoomClosure(roomId, room.getRoomName());
+
+        List<RoomInvitation> pendingInvitations = roomInvitationRepository
+                .findByRoomIdAndStatusOrderByCreatedAtDesc(roomId, RoomInvitation.Status.PENDING);
+        for (RoomInvitation invitation : pendingInvitations) {
+            invitation.setStatus(RoomInvitation.Status.EXPIRED);
+            invitation.setRespondedAt(LocalDateTime.now());
+        }
+        roomInvitationRepository.saveAll(pendingInvitations);
+
+        List<RoomMember> members = roomMemberRepository.findByRoomIdOrderByCreatedAtAsc(roomId);
+        for (RoomMember member : members) {
+            if (member.getStatus() == RoomMember.Status.JOINED || member.getStatus() == RoomMember.Status.INVITED) {
+                member.setStatus(RoomMember.Status.REMOVED);
+            }
+        }
+        roomMemberRepository.saveAll(members);
+
+        room.setStatus(Room.Status.CLOSED);
+        roomRepository.save(room);
+
+        return Map.of(
+                "communityId", room.getId(),
+                "status", room.getStatus().name()
+        );
+    }
+
+    @Transactional
     public RoomSummaryResponse joinByCode(Long userId, JoinRoomByCodeRequest request) {
-        String communityCode = request.getCommunityCode().trim().toUpperCase();
+        User currentUser = getUser(userId);
+        String code = request.getCommunityCode() == null
+                ? ""
+                : request.getCommunityCode().trim().toUpperCase();
 
-        Room room = roomRepository.findByRoomCode(communityCode)
-                .orElseThrow(() -> new RuntimeException("Invalid community code"));
-
-        contestEntryService.syncCommunityContestState(room.getId());
+        Room room = roomRepository.findByRoomCode(code)
+                .orElseThrow(() -> new RuntimeException("Community not found for this code"));
 
         if (room.getStatus() != Room.Status.ACTIVE) {
             throw new RuntimeException("Community is not active");
         }
 
-        RoomMember existing = roomMemberRepository.findByRoomIdAndUserId(room.getId(), userId).orElse(null);
-        if (existing != null && existing.getStatus() == RoomMember.Status.JOINED) {
-            throw new RuntimeException("You are already in this community");
+        RoomMember membership = roomMemberRepository.findByRoomIdAndUserId(room.getId(), userId).orElse(null);
+        if (membership != null && membership.getStatus() == RoomMember.Status.JOINED) {
+            return toRoomSummary(room, currentUser);
         }
 
         long memberCount = roomMemberRepository.countByRoomIdAndStatus(room.getId(), RoomMember.Status.JOINED);
@@ -206,8 +254,8 @@ public class RoomService {
             throw new RuntimeException("Community is full");
         }
 
-        if (existing == null) {
-            existing = RoomMember.builder()
+        if (membership == null) {
+            membership = RoomMember.builder()
                     .roomId(room.getId())
                     .userId(userId)
                     .role(RoomMember.Role.MEMBER)
@@ -215,28 +263,47 @@ public class RoomService {
                     .joinedAt(LocalDateTime.now())
                     .build();
         } else {
-            existing.setStatus(RoomMember.Status.JOINED);
-            existing.setRole(existing.getRole() == null ? RoomMember.Role.MEMBER : existing.getRole());
-            existing.setJoinedAt(LocalDateTime.now());
+            if (membership.getRole() != RoomMember.Role.OWNER) {
+                membership.setRole(RoomMember.Role.MEMBER);
+            }
+            membership.setStatus(RoomMember.Status.JOINED);
+            membership.setJoinedAt(LocalDateTime.now());
+        }
+        roomMemberRepository.save(membership);
+
+        List<RoomInvitation> pendingInvites = roomInvitationRepository
+                .findByRoomIdAndStatusOrderByCreatedAtDesc(room.getId(), RoomInvitation.Status.PENDING);
+        for (RoomInvitation invitation : pendingInvites) {
+            boolean matchesUser = Objects.equals(invitation.getInvitedUserId(), userId);
+            boolean matchesMobile = currentUser.getMobile() != null
+                    && !currentUser.getMobile().isBlank()
+                    && Objects.equals(invitation.getInvitedMobile(), currentUser.getMobile().trim());
+
+            if (matchesUser || matchesMobile) {
+                invitation.setStatus(RoomInvitation.Status.ACCEPTED);
+                invitation.setInvitedUserId(userId);
+                invitation.setRespondedAt(LocalDateTime.now());
+                roomInvitationRepository.save(invitation);
+            }
         }
 
-        roomMemberRepository.save(existing);
-        contestEntryService.createCommunityEntry(userId, room.getId());
+        if (!Objects.equals(room.getCreatedByUserId(), userId)) {
+            notificationService.createNotification(
+                    room.getCreatedByUserId(),
+                    "COMMUNITY_JOINED",
+                    "Community Joined",
+                    currentUser.getUsername() + " joined your community " + room.getRoomName() + " using the code",
+                    "{\"communityId\":" + room.getId() + "}"
+            );
+        }
 
-        return toRoomSummary(room, existing.getRole().name(), userId);
+        return toRoomSummary(room, currentUser);
     }
 
     @Transactional
     public Map<String, Object> inviteToRoom(Long inviterUserId, Long roomId, InviteToRoomRequest request) {
-        Room room = roomRepository.findById(roomId)
-                .orElseThrow(() -> new RuntimeException("Community not found"));
-
-        requireJoinedMember(roomId, inviterUserId, "Only community members can invite users");
-        ensureCommunityJoinWindowOpen(roomId);
-
-        if (room.getStatus() != Room.Status.ACTIVE) {
-            throw new RuntimeException("Community is not active");
-        }
+        Room room = requireActiveRoom(roomId);
+        requireOwnerMember(roomId, inviterUserId, "Only the community owner can invite users");
 
         String username = request.getUsername() != null ? request.getUsername().trim() : null;
         String mobile = request.getMobile() != null ? request.getMobile().trim() : null;
@@ -246,15 +313,43 @@ public class RoomService {
         }
 
         User targetUser = resolveInviteTargetUser(username, mobile);
-
         if (Objects.equals(targetUser.getId(), inviterUserId)) {
             throw new RuntimeException("You cannot invite yourself");
         }
 
-        RoomMember existing = roomMemberRepository.findByRoomIdAndUserId(roomId, targetUser.getId()).orElse(null);
-        if (existing != null && existing.getStatus() == RoomMember.Status.JOINED) {
+        RoomMember existingMembership = roomMemberRepository.findByRoomIdAndUserId(roomId, targetUser.getId()).orElse(null);
+        if (existingMembership != null && existingMembership.getStatus() == RoomMember.Status.JOINED) {
             throw new RuntimeException("User is already in this community");
         }
+
+        if (roomInvitationRepository.existsByRoomIdAndInvitedUserIdAndStatus(roomId, targetUser.getId(), RoomInvitation.Status.PENDING)
+                || (targetUser.getMobile() != null
+                && roomInvitationRepository.existsByRoomIdAndInvitedMobileAndStatus(
+                        roomId,
+                        targetUser.getMobile().trim(),
+                        RoomInvitation.Status.PENDING
+                ))) {
+            throw new RuntimeException("A pending invitation already exists for this user");
+        }
+
+        long memberCount = roomMemberRepository.countByRoomIdAndStatus(roomId, RoomMember.Status.JOINED);
+        if (memberCount >= room.getMaxMembers()) {
+            throw new RuntimeException("Community is full");
+        }
+
+        if (existingMembership == null) {
+            existingMembership = RoomMember.builder()
+                    .roomId(roomId)
+                    .userId(targetUser.getId())
+                    .role(RoomMember.Role.MEMBER)
+                    .status(RoomMember.Status.INVITED)
+                    .build();
+        } else {
+            existingMembership.setRole(RoomMember.Role.MEMBER);
+            existingMembership.setStatus(RoomMember.Status.INVITED);
+            existingMembership.setJoinedAt(null);
+        }
+        roomMemberRepository.save(existingMembership);
 
         RoomInvitation invitation = RoomInvitation.builder()
                 .roomId(roomId)
@@ -267,21 +362,18 @@ public class RoomService {
                 .build();
         invitation = roomInvitationRepository.save(invitation);
 
-        String payload = "{\"communityId\":" + roomId + ",\"invitationId\":" + invitation.getId() + "}";
-        Notification notification = Notification.builder()
-                .userId(targetUser.getId())
-                .type("COMMUNITY_INVITE")
-                .title("Community Invitation")
-                .body("You have been invited to join community " + room.getRoomName())
-                .payloadJson(payload)
-                .isRead(false)
-                .build();
-        notificationRepository.save(notification);
+        notificationService.createNotification(
+                targetUser.getId(),
+                "COMMUNITY_INVITE",
+                "Community Invitation",
+                "You have been invited to join community " + room.getRoomName(),
+                "{\"communityId\":" + roomId + ",\"invitationId\":" + invitation.getId() + "}"
+        );
 
         Map<String, Object> result = new HashMap<>();
         result.put("invitationId", invitation.getId());
         result.put("communityId", roomId);
-        result.put("invitedUserId", targetUser != null ? targetUser.getId() : null);
+        result.put("invitedUserId", targetUser.getId());
         result.put("invitedUsername", invitation.getInvitedUsername());
         result.put("invitedMobile", invitation.getInvitedMobile());
         result.put("status", invitation.getStatus().name());
@@ -289,33 +381,124 @@ public class RoomService {
     }
 
     @Transactional
-    public TeamResponse createCommunityTeam(Long userId, Long roomId, CreateTeamRequest request) {
-        contestEntryService.syncCommunityContestState(roomId);
+    public RoomAvailableContestResponse createCommunityContest(Long userId, Long roomId, CreateCommunityContestRequest request) {
+        validateJoinPoints(request.getJoiningPoints());
 
-        requireJoinedMember(roomId, userId, "You are not a member of this community");
+        Room room = requireActiveRoom(roomId);
+        requireJoinedMember(roomId, userId, "Only community members can create community contests");
 
-        Contest contest = contestRepository.findByRoomId(roomId)
+        Fixture fixture = fixtureRepository.findById(request.getFixtureId())
+                .orElseThrow(() -> new RuntimeException("Fixture not found"));
+        if (!fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
+            throw new RuntimeException("Contest creation is closed for this fixture");
+        }
+
+        if (!Objects.equals(room.getSportId(), fixture.getSportId())) {
+            throw new RuntimeException("Fixture sport does not match community sport");
+        }
+
+        int winnerCount = request.getWinnerCount() == null ? 1 : request.getWinnerCount();
+        int maxSpots = request.getMaxSpots() == null ? room.getMaxMembers() : request.getMaxSpots();
+        validateCommunityContestStructure(winnerCount, maxSpots, room.getMaxMembers());
+
+        User creator = getUser(userId);
+
+        Contest contest = Contest.builder()
+                .fixtureId(fixture.getId())
+                .roomId(room.getId())
+                .scoringTemplateId(1L)
+                .contestName(buildCommunityContestName(fixture, request.getJoiningPoints(), creator.getUsername()))
+                .contestType(Contest.ContestType.COMMUNITY)
+                .entryFeePoints(request.getJoiningPoints())
+                .prizePoolPoints(0)
+                .winnerCount(winnerCount)
+                .maxSpots(maxSpots)
+                .spotsFilled(0)
+                .joinConfirmRequired(false)
+                .firstPrizePoints(0)
+                .status(Contest.Status.OPEN)
+                .createdByUserId(userId)
+                .build();
+
+        contest = contestRepository.save(contest);
+        contestEntryService.reserveCommunityContestSpot(userId, contest.getId());
+        contest = contestRepository.findById(contest.getId())
                 .orElseThrow(() -> new RuntimeException("Community contest not found"));
+        return toRoomContestResponse(contest, room, creator);
+    }
+
+    @Transactional
+    public Map<String, Object> inviteToCommunityContest(
+            Long inviterUserId,
+            Long roomId,
+            Long contestId,
+            InviteToCommunityContestRequest request
+    ) {
+        Room room = requireActiveRoom(roomId);
+        RoomMember inviterMembership = requireJoinedMember(roomId, inviterUserId, "You are not a member of this community");
+        Contest contest = contestRepository.findByIdAndRoomId(contestId, roomId)
+                .orElseThrow(() -> new RuntimeException("Community contest not found"));
+
+        boolean isOwner = inviterMembership.getRole() == RoomMember.Role.OWNER;
+        boolean isContestCreator = Objects.equals(contest.getCreatedByUserId(), inviterUserId);
+        if (!isOwner && !isContestCreator) {
+            throw new RuntimeException("Only the contest creator or community owner can invite to this contest");
+        }
 
         Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
                 .orElseThrow(() -> new RuntimeException("Fixture not found"));
-
         if (!fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
-            throw new RuntimeException("Team creation is closed for this community");
+            throw new RuntimeException("Contest invites are closed because the fixture has started");
+        }
+        if (contest.getStatus() == Contest.Status.CANCELLED || contest.getStatus() == Contest.Status.COMPLETED) {
+            throw new RuntimeException("This contest is no longer active");
         }
 
-        contestEntryRepository.findByContestIdAndUserId(contest.getId(), userId)
-                .orElseThrow(() -> new RuntimeException("You have not joined this community"));
+        String username = request.getUsername() != null ? request.getUsername().trim() : null;
+        String mobile = request.getMobile() != null ? request.getMobile().trim() : null;
+        if ((username == null || username.isBlank()) && (mobile == null || mobile.isBlank())) {
+            throw new RuntimeException("Username or mobile is required");
+        }
 
-        TeamResponse team = teamService.createTeam(userId, fixture.getId(), request);
-        contestEntryService.attachTeamToCommunityEntry(userId, roomId, team.getTeamId());
-        return team;
+        User targetUser = resolveInviteTargetUser(username, mobile);
+        if (Objects.equals(targetUser.getId(), inviterUserId)) {
+            throw new RuntimeException("You cannot invite yourself");
+        }
+
+        roomMemberRepository.findByRoomIdAndUserId(roomId, targetUser.getId())
+                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
+                .orElseThrow(() -> new RuntimeException("Only users inside this community can be invited to the contest"));
+
+        if (contestEntryRepository.existsByContestIdAndUserId(contestId, targetUser.getId())) {
+            throw new RuntimeException("User has already joined this contest");
+        }
+
+        User inviter = getUser(inviterUserId);
+        notificationService.createNotification(
+                targetUser.getId(),
+                "COMMUNITY_CONTEST_INVITE",
+                "Community Contest Invitation",
+                inviter.getUsername() + " invited you to " + contest.getContestName(),
+                "{\"communityId\":" + roomId + ",\"contestId\":" + contestId + "}"
+        );
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("communityId", roomId);
+        result.put("contestId", contestId);
+        result.put("invitedUserId", targetUser.getId());
+        result.put("invitedUsername", targetUser.getUsername());
+        result.put("status", "SENT");
+        return result;
+    }
+
+    @Transactional
+    public TeamResponse createCommunityTeam(Long userId, Long roomId, CreateTeamRequest request) {
+        throw new RuntimeException("Create a team from the fixture and join a specific community contest instead");
     }
 
     @Transactional
     public ContestEntryResponse selectCommunityTeam(Long userId, Long roomId, SelectCommunityTeamRequest request) {
-        requireJoinedMember(roomId, userId, "You are not a member of this community");
-        return contestEntryService.attachTeamToCommunityEntry(userId, roomId, request.getTeamId());
+        throw new RuntimeException("Join a specific community contest with the team you want to use");
     }
 
     @Transactional
@@ -323,37 +506,19 @@ public class RoomService {
         RoomInvitation invitation = roomInvitationRepository.findByIdAndStatus(invitationId, RoomInvitation.Status.PENDING)
                 .orElseThrow(() -> new RuntimeException("Invitation not found"));
 
-        User currentUser = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        User currentUser = getUser(currentUserId);
+        validateInvitationOwnership(invitation, currentUser);
 
-        boolean allowed = false;
-        if (invitation.getInvitedUserId() != null && Objects.equals(invitation.getInvitedUserId(), currentUserId)) {
-            allowed = true;
-        }
-        if (!allowed && invitation.getInvitedUserId() == null && invitation.getInvitedMobile() != null) {
-            allowed = invitation.getInvitedMobile().equals(currentUser.getMobile());
-        }
-        if (!allowed) {
-            throw new RuntimeException("This invitation does not belong to you");
-        }
-
-        Room room = roomRepository.findById(invitation.getRoomId())
-                .orElseThrow(() -> new RuntimeException("Community not found"));
-
-        contestEntryService.syncCommunityContestState(room.getId());
-
-        if (room.getStatus() != Room.Status.ACTIVE) {
-            throw new RuntimeException("Community is not active");
-        }
+        Room room = requireActiveRoom(invitation.getRoomId());
 
         long memberCount = roomMemberRepository.countByRoomIdAndStatus(room.getId(), RoomMember.Status.JOINED);
         if (memberCount >= room.getMaxMembers()) {
             throw new RuntimeException("Community is full");
         }
 
-        RoomMember existing = roomMemberRepository.findByRoomIdAndUserId(room.getId(), currentUserId).orElse(null);
-        if (existing == null) {
-            existing = RoomMember.builder()
+        RoomMember membership = roomMemberRepository.findByRoomIdAndUserId(room.getId(), currentUserId).orElse(null);
+        if (membership == null) {
+            membership = RoomMember.builder()
                     .roomId(room.getId())
                     .userId(currentUserId)
                     .role(RoomMember.Role.MEMBER)
@@ -361,32 +526,26 @@ public class RoomService {
                     .joinedAt(LocalDateTime.now())
                     .build();
         } else {
-            existing.setStatus(RoomMember.Status.JOINED);
-            existing.setJoinedAt(LocalDateTime.now());
-            if (existing.getRole() == null) {
-                existing.setRole(RoomMember.Role.MEMBER);
-            }
+            membership.setRole(RoomMember.Role.MEMBER);
+            membership.setStatus(RoomMember.Status.JOINED);
+            membership.setJoinedAt(LocalDateTime.now());
         }
-
-        roomMemberRepository.save(existing);
-        contestEntryService.createCommunityEntry(currentUserId, room.getId());
+        roomMemberRepository.save(membership);
 
         invitation.setStatus(RoomInvitation.Status.ACCEPTED);
         invitation.setInvitedUserId(currentUserId);
         invitation.setRespondedAt(LocalDateTime.now());
         roomInvitationRepository.save(invitation);
 
-        Notification notification = Notification.builder()
-                .userId(invitation.getInvitedByUserId())
-                .type("COMMUNITY_INVITE_ACCEPTED")
-                .title("Invitation Accepted")
-                .body(currentUser.getUsername() + " joined your community " + room.getRoomName())
-                .payloadJson("{\"communityId\":" + room.getId() + "}")
-                .isRead(false)
-                .build();
-        notificationRepository.save(notification);
+        notificationService.createNotification(
+                invitation.getInvitedByUserId(),
+                "COMMUNITY_INVITE_ACCEPTED",
+                "Invitation Accepted",
+                currentUser.getUsername() + " joined your community " + room.getRoomName(),
+                "{\"communityId\":" + room.getId() + "}"
+        );
 
-        return toRoomSummary(room, existing.getRole().name(), currentUserId);
+        return toRoomSummary(room, currentUser);
     }
 
     @Transactional
@@ -394,18 +553,13 @@ public class RoomService {
         RoomInvitation invitation = roomInvitationRepository.findByIdAndStatus(invitationId, RoomInvitation.Status.PENDING)
                 .orElseThrow(() -> new RuntimeException("Invitation not found"));
 
-        User currentUser = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        User currentUser = getUser(currentUserId);
+        validateInvitationOwnership(invitation, currentUser);
 
-        boolean allowed = false;
-        if (invitation.getInvitedUserId() != null && Objects.equals(invitation.getInvitedUserId(), currentUserId)) {
-            allowed = true;
-        }
-        if (!allowed && invitation.getInvitedUserId() == null && invitation.getInvitedMobile() != null) {
-            allowed = invitation.getInvitedMobile().equals(currentUser.getMobile());
-        }
-        if (!allowed) {
-            throw new RuntimeException("This invitation does not belong to you");
+        RoomMember membership = roomMemberRepository.findByRoomIdAndUserId(invitation.getRoomId(), currentUserId).orElse(null);
+        if (membership != null && membership.getStatus() == RoomMember.Status.INVITED) {
+            membership.setStatus(RoomMember.Status.LEFT);
+            roomMemberRepository.save(membership);
         }
 
         invitation.setStatus(RoomInvitation.Status.DECLINED);
@@ -413,31 +567,25 @@ public class RoomService {
         invitation.setRespondedAt(LocalDateTime.now());
         roomInvitationRepository.save(invitation);
 
-        Notification notification = Notification.builder()
-                .userId(invitation.getInvitedByUserId())
-                .type("COMMUNITY_INVITE_DECLINED")
-                .title("Invitation Declined")
-                .body(currentUser.getUsername() + " declined your community invite")
-                .payloadJson("{\"communityId\":" + invitation.getRoomId() + "}")
-                .isRead(false)
-                .build();
-        notificationRepository.save(notification);
+        notificationService.createNotification(
+                invitation.getInvitedByUserId(),
+                "COMMUNITY_INVITE_DECLINED",
+                "Invitation Declined",
+                currentUser.getUsername() + " declined your community invite",
+                "{\"communityId\":" + invitation.getRoomId() + "}"
+        );
 
-        Map<String, Object> result = new HashMap<>();
-        result.put("invitationId", invitation.getId());
-        result.put("status", invitation.getStatus().name());
-        return result;
+        return Map.of(
+                "invitationId", invitation.getId(),
+                "status", invitation.getStatus().name()
+        );
     }
 
     public List<RoomInvitationResponse> getIncomingInvitations(Long currentUserId) {
-        User currentUser = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+        User currentUser = getUser(currentUserId);
 
-        List<RoomInvitation> invitations = new ArrayList<>();
-        invitations.addAll(roomInvitationRepository.findByInvitedUserIdAndStatusOrderByCreatedAtDesc(
-                currentUserId,
-                RoomInvitation.Status.PENDING
-        ));
+        List<RoomInvitation> invitations = new ArrayList<>(roomInvitationRepository
+                .findByInvitedUserIdAndStatusOrderByCreatedAtDesc(currentUserId, RoomInvitation.Status.PENDING));
 
         if (currentUser.getMobile() != null && !currentUser.getMobile().isBlank()) {
             List<RoomInvitation> mobileInvites = roomInvitationRepository
@@ -445,13 +593,12 @@ public class RoomService {
                             currentUser.getMobile().trim(),
                             RoomInvitation.Status.PENDING
                     );
-
             Set<Long> seenIds = new HashSet<>();
             for (RoomInvitation invitation : invitations) {
                 seenIds.add(invitation.getId());
             }
             for (RoomInvitation invitation : mobileInvites) {
-                if (!seenIds.contains(invitation.getId())) {
+                if (seenIds.add(invitation.getId())) {
                     invitations.add(invitation);
                 }
             }
@@ -463,43 +610,57 @@ public class RoomService {
     }
 
     public List<RoomMemberResponse> getRoomMembers(Long roomId, Long currentUserId) {
-        contestEntryService.syncCommunityContestState(roomId);
         requireJoinedMember(roomId, currentUserId, "You are not a member of this community");
-
-        Contest contest = contestRepository.findByRoomId(roomId).orElse(null);
-        Map<Long, Boolean> teamCreatedByUser = new HashMap<>();
-        if (contest != null) {
-            for (ContestEntry entry : contestEntryRepository.findByContestIdOrderByJoinedAtAsc(contest.getId())) {
-                teamCreatedByUser.put(entry.getUserId(), entry.getUserMatchTeamId() != null);
-            }
-        }
 
         return roomMemberRepository.findByRoomIdAndStatusOrderByJoinedAtAsc(roomId, RoomMember.Status.JOINED)
                 .stream()
-                .map(member -> toMemberResponse(member, teamCreatedByUser.getOrDefault(member.getUserId(), false)))
+                .map(this::toMemberResponse)
                 .toList();
     }
 
     public TeamResponse getCommunityTeamView(Long roomId, Long teamId, Long currentUserId) {
-        contestEntryService.syncCommunityContestState(roomId);
+        throw new RuntimeException("Open the contest directly to review participating teams");
+    }
 
-        requireJoinedMember(roomId, currentUserId, "You are not a member of this community");
-
-        Contest contest = contestRepository.findByRoomId(roomId)
-                .orElseThrow(() -> new RuntimeException("Community contest not found"));
-
-        Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
-                .orElseThrow(() -> new RuntimeException("Fixture not found"));
-
-        if (contest.getStatus() != Contest.Status.CANCELLED
-                && fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
-            throw new RuntimeException("Participant teams can be viewed after the match starts");
+    private Room requireActiveRoom(Long roomId) {
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new RuntimeException("Community not found"));
+        if (room.getStatus() != Room.Status.ACTIVE) {
+            throw new RuntimeException("Community is not active");
         }
+        return room;
+    }
 
-        contestEntryRepository.findByContestIdAndUserMatchTeamId(contest.getId(), teamId)
-                .orElseThrow(() -> new RuntimeException("This team is not part of the community"));
+    private User getUser(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+    }
 
-        return teamService.getTeamById(teamId);
+    private RoomMember requireJoinedMember(Long roomId, Long userId, String message) {
+        return roomMemberRepository.findByRoomIdAndUserId(roomId, userId)
+                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
+                .orElseThrow(() -> new RuntimeException(message));
+    }
+
+    private RoomMember requireOwnerMember(Long roomId, Long userId, String message) {
+        RoomMember membership = requireJoinedMember(roomId, userId, message);
+        if (membership.getRole() != RoomMember.Role.OWNER) {
+            throw new RuntimeException(message);
+        }
+        return membership;
+    }
+
+    private void validateInvitationOwnership(RoomInvitation invitation, User currentUser) {
+        boolean allowed = false;
+        if (invitation.getInvitedUserId() != null && Objects.equals(invitation.getInvitedUserId(), currentUser.getId())) {
+            allowed = true;
+        }
+        if (!allowed && invitation.getInvitedUserId() == null && invitation.getInvitedMobile() != null) {
+            allowed = invitation.getInvitedMobile().equals(currentUser.getMobile());
+        }
+        if (!allowed) {
+            throw new RuntimeException("This invitation does not belong to you");
+        }
     }
 
     private User resolveInviteTargetUser(String username, String mobile) {
@@ -526,7 +687,7 @@ public class RoomService {
     private RoomInvitationResponse toRoomInvitationResponse(RoomInvitation invitation) {
         Room room = roomRepository.findById(invitation.getRoomId()).orElse(null);
         User inviter = userRepository.findById(invitation.getInvitedByUserId()).orElse(null);
-        Contest contest = room == null ? null : contestRepository.findByRoomId(room.getId()).orElse(null);
+
         long joinedMembers = room == null
                 ? 0L
                 : roomMemberRepository.countByRoomIdAndStatus(room.getId(), RoomMember.Status.JOINED);
@@ -536,7 +697,8 @@ public class RoomService {
                 .communityId(invitation.getRoomId())
                 .communityName(room != null ? room.getRoomName() : null)
                 .invitedBy(inviter != null ? inviter.getUsername() : null)
-                .joiningPoints(contest != null ? contest.getEntryFeePoints() : null)
+                .invitedByUsername(inviter != null ? inviter.getUsername() : null)
+                .joiningPoints(null)
                 .maxSpots(room != null ? room.getMaxMembers() : null)
                 .joinedMembers(joinedMembers)
                 .invitedByUserId(invitation.getInvitedByUserId())
@@ -550,116 +712,261 @@ public class RoomService {
                 .build();
     }
 
-    private RoomSummaryResponse toRoomSummary(Room room, String myRole, Long currentUserId) {
-        Contest contest = contestRepository.findByRoomId(room.getId()).orElse(null);
-        Fixture fixture = resolveFixture(room, contest);
-        ContestEntry myEntry = contest == null
-                ? null
-                : contestEntryRepository.findByContestIdAndUserId(contest.getId(), currentUserId).orElse(null);
-        LocalDateTime now = LocalDateTime.now();
-        boolean contestEnded = contest != null
-                && (contest.getStatus() == Contest.Status.COMPLETED
-                || contest.getStatus() == Contest.Status.CANCELLED);
-        boolean beforeDeadline = fixture != null && fixture.getDeadlineTime().isAfter(now);
+    private RoomSummaryResponse toRoomSummary(Room room, User currentUser) {
+        RoomMember myMembership = roomMemberRepository.findByRoomIdAndUserId(room.getId(), currentUser.getId())
+                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
+                .orElse(null);
+        boolean isOwner = myMembership != null && myMembership.getRole() == RoomMember.Role.OWNER;
 
-        boolean teamCreated = myEntry != null && myEntry.getUserMatchTeamId() != null;
-        boolean canCreateTeam = myEntry != null
-                && myEntry.getStatus() == ContestEntry.Status.JOINED
-                && fixture != null
-                && beforeDeadline
-                && !contestEnded;
-        boolean canInvite = fixture != null && beforeDeadline && !contestEnded;
-        boolean canViewParticipantTeams = contestEnded || (fixture != null && !beforeDeadline);
+        boolean invited = hasPendingInvitation(room.getId(), currentUser);
+        User creator = userRepository.findById(room.getCreatedByUserId()).orElse(null);
+        List<Contest> contests = contestRepository.findByRoomIdOrderByCreatedAtDescIdDesc(room.getId());
 
         return RoomSummaryResponse.builder()
                 .communityId(room.getId())
-                .contestId(contest != null ? contest.getId() : null)
-                .fixtureId(fixture != null ? fixture.getId() : room.getFixtureId())
+                .contestId(contests.isEmpty() ? null : contests.get(0).getId())
+                .fixtureId(null)
                 .sportId(room.getSportId())
                 .createdByUserId(room.getCreatedByUserId())
+                .createdByUsername(creator != null ? creator.getUsername() : null)
                 .communityName(room.getRoomName())
-                .communityCode(room.getRoomCode())
+                .communityCode(isOwner ? room.getRoomCode() : null)
                 .isPrivate(room.getIsPrivate())
                 .maxSpots(room.getMaxMembers())
                 .joinedMembers(roomMemberRepository.countByRoomIdAndStatus(room.getId(), RoomMember.Status.JOINED))
-                .joiningPoints(contest != null ? contest.getEntryFeePoints() : null)
-                .prizePoolPoints(contest != null ? contest.getPrizePoolPoints() : null)
-                .winnerPayoutPoints(contest != null ? contest.getFirstPrizePoints() : null)
-                .myRole(myRole)
+                .contestCount((int) contestRepository.countByRoomId(room.getId()))
+                .joiningPoints(null)
+                .prizePoolPoints(null)
+                .winnerPayoutPoints(null)
+                .myRole(myMembership != null ? myMembership.getRole().name() : null)
                 .status(room.getStatus().name())
-                .contestStatus(contest != null ? contest.getStatus().name() : null)
-                .fixtureStatus(fixture != null ? fixture.getStatus() : null)
-                .fixtureTitle(fixture != null ? fixture.getTitle() : null)
-                .fixtureStartTime(fixture != null ? fixture.getStartTime() : null)
-                .fixtureDeadlineTime(fixture != null ? fixture.getDeadlineTime() : null)
-                .teamCreated(teamCreated)
-                .canCreateTeam(canCreateTeam)
-                .canInvite(canInvite)
-                .canViewParticipantTeams(canViewParticipantTeams)
+                .isMember(myMembership != null)
+                .isInvited(invited)
+                .contestStatus(summarizeContestStatus(contests))
+                .fixtureStatus(null)
+                .fixtureTitle(null)
+                .fixtureStartTime(null)
+                .fixtureDeadlineTime(null)
+                .teamCreated(false)
+                .canCreateTeam(false)
+                .canInvite(isOwner && room.getStatus() == Room.Status.ACTIVE)
+                .canViewParticipantTeams(false)
+                .canEdit(isOwner && room.getStatus() == Room.Status.ACTIVE)
+                .canDelete(isOwner && room.getStatus() == Room.Status.ACTIVE)
                 .build();
     }
 
-    private RoomMemberResponse toMemberResponse(RoomMember member, boolean teamCreated) {
-        User user = userRepository.findById(member.getUserId())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+    private String summarizeContestStatus(List<Contest> contests) {
+        if (contests.isEmpty()) {
+            return "NO_CONTESTS";
+        }
 
+        boolean hasLive = contests.stream().anyMatch(contest -> contest.getStatus() == Contest.Status.LIVE);
+        if (hasLive) {
+            return Contest.Status.LIVE.name();
+        }
+
+        boolean hasOpen = contests.stream().anyMatch(contest ->
+                contest.getStatus() == Contest.Status.OPEN || contest.getStatus() == Contest.Status.FULL
+        );
+        if (hasOpen) {
+            return Contest.Status.OPEN.name();
+        }
+
+        boolean hasCompleted = contests.stream().anyMatch(contest -> contest.getStatus() == Contest.Status.COMPLETED);
+        if (hasCompleted) {
+            return Contest.Status.COMPLETED.name();
+        }
+
+        boolean hasCancelled = contests.stream().anyMatch(contest -> contest.getStatus() == Contest.Status.CANCELLED);
+        if (hasCancelled) {
+            return Contest.Status.CANCELLED.name();
+        }
+
+        return contests.get(0).getStatus().name();
+    }
+
+    private RoomAvailableContestResponse toRoomContestResponse(Contest contest, Room room, User currentUser) {
+        Fixture fixture = fixtureRepository.findById(contest.getFixtureId()).orElse(null);
+        List<FixtureParticipant> participants = fixture == null
+                ? List.of()
+                : fixtureParticipantRepository.findByFixtureIdOrderByIsHomeDescTeamNameAsc(fixture.getId());
+        User creator = contest.getCreatedByUserId() == null ? null : userRepository.findById(contest.getCreatedByUserId()).orElse(null);
+        RoomMember viewerMembership = roomMemberRepository.findByRoomIdAndUserId(room.getId(), currentUser.getId())
+                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
+                .orElse(null);
+
+        long myEntriesCount = contestEntryRepository.countByContestIdAndUserId(contest.getId(), currentUser.getId());
+        boolean beforeDeadline = fixture != null && fixture.getDeadlineTime().isAfter(LocalDateTime.now());
+        boolean canJoin = viewerMembership != null
+                && contest.getStatus() == Contest.Status.OPEN
+                && beforeDeadline
+                && contest.getSpotsFilled() < contest.getMaxSpots();
+        boolean canInvite = viewerMembership != null
+                && beforeDeadline
+                && contest.getStatus() != Contest.Status.CANCELLED
+                && contest.getStatus() != Contest.Status.COMPLETED
+                && (viewerMembership.getRole() == RoomMember.Role.OWNER
+                || Objects.equals(contest.getCreatedByUserId(), currentUser.getId()));
+
+        String fixtureLeague = "";
+        if (fixture != null) {
+            fixtureLeague = fixtureSnapshotMapper.buildSnapshot(fixture, participants).league();
+        }
+
+        return RoomAvailableContestResponse.builder()
+                .contestId(contest.getId())
+                .communityId(room.getId())
+                .fixtureId(contest.getFixtureId())
+                .contestName(contest.getContestName())
+                .entryFeePoints(contest.getEntryFeePoints())
+                .prizePoolPoints(contest.getPrizePoolPoints())
+                .winnerCount(contest.getWinnerCount())
+                .maxSpots(contest.getMaxSpots())
+                .spotsFilled(contest.getSpotsFilled())
+                .spotsLeft(Math.max(0, contest.getMaxSpots() - contest.getSpotsFilled()))
+                .joinConfirmRequired(contest.getJoinConfirmRequired())
+                .firstPrizePoints(contest.getFirstPrizePoints())
+                .contestStatus(contest.getStatus().name())
+                .createdByUserId(contest.getCreatedByUserId())
+                .createdByUsername(creator != null ? creator.getUsername() : null)
+                .fixtureLeague(fixtureLeague)
+                .myEntriesCount((int) myEntriesCount)
+                .joinedByMe(myEntriesCount > 0)
+                .canJoin(canJoin)
+                .canInvite(canInvite)
+                .fixtureTitle(fixture != null ? fixture.getTitle() : null)
+                .fixtureStartTime(fixture != null ? fixture.getStartTime() : null)
+                .fixtureDeadlineTime(fixture != null ? fixture.getDeadlineTime() : null)
+                .participants(participants.stream()
+                        .map(participant -> AvailableContestFixtureParticipantResponse.builder()
+                                .externalTeamId(participant.getExternalTeamId())
+                                .teamName(participant.getTeamName())
+                                .shortName(participant.getShortName())
+                                .logoUrl(participant.getLogoUrl())
+                                .isHome(participant.getIsHome())
+                                .build())
+                        .toList())
+                .build();
+    }
+
+    private RoomMemberResponse toMemberResponse(RoomMember member) {
+        User user = getUser(member.getUserId());
         return RoomMemberResponse.builder()
                 .userId(user.getId())
                 .username(user.getUsername())
                 .mobile(user.getMobile())
                 .role(member.getRole().name())
                 .status(member.getStatus().name())
-                .teamCreated(teamCreated)
+                .teamCreated(false)
                 .joinedAt(member.getJoinedAt())
                 .build();
     }
 
-    private Fixture resolveFixture(Room room, Contest contest) {
-        Long fixtureId = room.getFixtureId();
-        if (fixtureId == null && contest != null) {
-            fixtureId = contest.getFixtureId();
+    private boolean hasPendingInvitation(Long roomId, User user) {
+        if (roomInvitationRepository.existsByRoomIdAndInvitedUserIdAndStatus(roomId, user.getId(), RoomInvitation.Status.PENDING)) {
+            return true;
         }
 
-        if (fixtureId == null) {
-            return null;
-        }
-
-        return fixtureRepository.findById(fixtureId).orElse(null);
+        return user.getMobile() != null
+                && !user.getMobile().isBlank()
+                && roomInvitationRepository.existsByRoomIdAndInvitedMobileAndStatus(
+                roomId,
+                user.getMobile().trim(),
+                RoomInvitation.Status.PENDING
+        );
     }
 
-    private RoomMember requireJoinedMember(Long roomId, Long userId, String message) {
-        return roomMemberRepository.findByRoomIdAndUserId(roomId, userId)
-                .filter(member -> member.getStatus() == RoomMember.Status.JOINED)
-                .orElseThrow(() -> new RuntimeException(message));
-    }
-
-    private void ensureCommunityJoinWindowOpen(Long roomId) {
-        contestEntryService.syncCommunityContestState(roomId);
-
-        Contest contest = contestRepository.findByRoomId(roomId).orElse(null);
-        if (contest == null) {
-            return;
+    private String buildCommunityContestName(Fixture fixture, Integer joiningPoints, String username) {
+        List<FixtureParticipant> participants = fixtureParticipantRepository.findByFixtureIdOrderByIsHomeDescTeamNameAsc(fixture.getId());
+        String matchLabel = fixture.getTitle();
+        if (participants.size() >= 2) {
+            FixtureParticipant home = participants.stream()
+                    .filter(FixtureParticipant::getIsHome)
+                    .findFirst()
+                    .orElse(participants.get(0));
+            FixtureParticipant away = participants.stream()
+                    .filter(participant -> !Boolean.TRUE.equals(participant.getIsHome()))
+                    .findFirst()
+                    .orElse(participants.get(1));
+            String homeShort = home.getShortName() != null && !home.getShortName().isBlank() ? home.getShortName() : home.getTeamName();
+            String awayShort = away.getShortName() != null && !away.getShortName().isBlank() ? away.getShortName() : away.getTeamName();
+            matchLabel = homeShort + " vs " + awayShort;
         }
 
-        Fixture fixture = fixtureRepository.findById(contest.getFixtureId())
-                .orElseThrow(() -> new RuntimeException("Fixture not found"));
-
-        if (!fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
-            throw new RuntimeException("Community invites are closed because the fixture has started");
-        }
-
-        if (contest.getStatus() == Contest.Status.CANCELLED) {
-            throw new RuntimeException("Community invites are closed because the match was cancelled");
-        }
-
-        if (contest.getStatus() == Contest.Status.COMPLETED) {
-            throw new RuntimeException("Community invites are closed because this contest has already ended");
-        }
+        return matchLabel + " " + joiningPoints + " point contest by " + username;
     }
 
     private void validateJoinPoints(Integer joiningPoints) {
         if (!ALLOWED_JOIN_POINTS.contains(joiningPoints)) {
             throw new RuntimeException("Joining points must be one of 500, 1000, 2000, 5000, 10000, 20000, 50000");
+        }
+    }
+
+    private void validateCommunityContestStructure(int winnerCount, int maxSpots, int communityMaxMembers) {
+        if (winnerCount < 1 || winnerCount > 3) {
+            throw new RuntimeException("winnerCount must be 1, 2, or 3");
+        }
+
+        int minSpots = switch (winnerCount) {
+            case 1 -> 2;
+            case 2 -> 5;
+            case 3 -> 10;
+            default -> 2;
+        };
+        int maxAllowedSpots = switch (winnerCount) {
+            case 1 -> 10;
+            case 2 -> 20;
+            case 3 -> 30;
+            default -> 10;
+        };
+
+        if (maxSpots < minSpots || maxSpots > maxAllowedSpots) {
+            throw new RuntimeException(
+                    "maxSpots must be between " + minSpots + " and " + maxAllowedSpots
+                            + " when winnerCount is " + winnerCount
+            );
+        }
+
+        if (maxSpots > communityMaxMembers) {
+            throw new RuntimeException("Contest max spots cannot exceed the community member limit");
+        }
+    }
+
+    private String normalizeCommunityName(String communityName) {
+        if (communityName == null || communityName.trim().isBlank()) {
+            throw ApiException.badRequest("Community name is required");
+        }
+
+        String normalized = communityName.trim().replaceAll("\\s+", " ");
+        if (normalized.length() > 100) {
+            throw ApiException.badRequest("Community name must be 100 characters or less");
+        }
+        return normalized;
+    }
+
+    private void syncOpenCommunityContestCap(Room room) {
+        List<Contest> contests = contestRepository.findByRoomIdOrderByCreatedAtDescIdDesc(room.getId());
+        List<Contest> updatableContests = new ArrayList<>();
+
+        for (Contest contest : contests) {
+            if (contest.getStatus() != Contest.Status.OPEN && contest.getStatus() != Contest.Status.FULL) {
+                continue;
+            }
+
+            int nextMaxSpots = Math.min(
+                    contest.getMaxSpots() != null ? contest.getMaxSpots() : room.getMaxMembers(),
+                    room.getMaxMembers()
+            );
+            contest.setMaxSpots(nextMaxSpots);
+            contest.setStatus(contest.getSpotsFilled() >= nextMaxSpots
+                    ? Contest.Status.FULL
+                    : Contest.Status.OPEN);
+            updatableContests.add(contest);
+        }
+
+        if (!updatableContests.isEmpty()) {
+            contestRepository.saveAll(updatableContests);
         }
     }
 

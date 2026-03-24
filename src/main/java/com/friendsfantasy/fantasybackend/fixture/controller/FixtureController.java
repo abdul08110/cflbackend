@@ -17,10 +17,12 @@ public class FixtureController {
     private final FixtureSyncService fixtureSyncService;
 
     @GetMapping("/cricket/fixtures/upcoming")
-    public ApiResponse<List<FixtureSummaryResponse>> getUpcomingFixtures() {
+    public ApiResponse<List<FixtureSummaryResponse>> getUpcomingFixtures(
+            @RequestParam(required = false) Integer limit
+    ) {
         return ApiResponse.ok(
                 "Upcoming cricket fixtures fetched successfully",
-                fixtureSyncService.getUpcomingFixtures()
+                fixtureSyncService.getUpcomingFixtures(limit)
         );
     }
 

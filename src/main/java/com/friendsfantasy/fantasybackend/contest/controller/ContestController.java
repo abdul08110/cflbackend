@@ -3,7 +3,9 @@ package com.friendsfantasy.fantasybackend.contest.controller;
 import com.friendsfantasy.fantasybackend.common.ApiResponse;
 import com.friendsfantasy.fantasybackend.contest.dto.ContestResponse;
 import com.friendsfantasy.fantasybackend.contest.service.ContestService;
+import com.friendsfantasy.fantasybackend.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,10 +26,13 @@ public class ContestController {
     }
 
     @GetMapping("/contests/{contestId}")
-    public ApiResponse<ContestResponse> getContest(@PathVariable Long contestId) {
+    public ApiResponse<ContestResponse> getContest(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long contestId
+    ) {
         return ApiResponse.ok(
                 "Contest fetched successfully",
-                contestService.getContest(contestId)
+                contestService.getContest(contestId, principal.getId())
         );
     }
 }

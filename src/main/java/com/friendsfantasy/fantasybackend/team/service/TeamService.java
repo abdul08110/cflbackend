@@ -1,5 +1,6 @@
 package com.friendsfantasy.fantasybackend.team.service;
 
+import com.friendsfantasy.fantasybackend.contest.repository.ContestEntryRepository;
 import com.friendsfantasy.fantasybackend.fixture.dto.FixturePlayerPoolResponse;
 import com.friendsfantasy.fantasybackend.fixture.entity.Fixture;
 import com.friendsfantasy.fantasybackend.fixture.entity.FixtureParticipant;
@@ -12,6 +13,9 @@ import com.friendsfantasy.fantasybackend.integration.sportmonks.SportMonksCricke
 import com.friendsfantasy.fantasybackend.common.ApiException;
 import com.friendsfantasy.fantasybackend.player.entity.Player;
 import com.friendsfantasy.fantasybackend.player.repository.PlayerRepository;
+import com.friendsfantasy.fantasybackend.notification.entity.Notification;
+import com.friendsfantasy.fantasybackend.notification.repository.NotificationRepository;
+import com.friendsfantasy.fantasybackend.notification.service.NotificationService;
 import com.friendsfantasy.fantasybackend.team.dto.*;
 import com.friendsfantasy.fantasybackend.team.entity.UserMatchTeam;
 import com.friendsfantasy.fantasybackend.team.entity.UserMatchTeamPlayer;
@@ -37,15 +41,20 @@ import java.util.*;
 @RequiredArgsConstructor
 public class TeamService {
 
+    private static final String LINEUP_ANNOUNCED_NOTIFICATION_TYPE = "LINEUP_ANNOUNCED";
+
     private final FixtureRepository fixtureRepository;
     private final FixtureParticipantRepository fixtureParticipantRepository;
     private final FixturePlayerPoolRepository fixturePlayerPoolRepository;
     private final PlayerRepository playerRepository;
     private final UserMatchTeamRepository userMatchTeamRepository;
     private final UserMatchTeamPlayerRepository userMatchTeamPlayerRepository;
+    private final ContestEntryRepository contestEntryRepository;
     private final FixtureSyncService fixtureSyncService;
     private final SportMonksCricketClient sportMonksCricketClient;
     private final ObjectMapper objectMapper;
+    private final NotificationService notificationService;
+    private final NotificationRepository notificationRepository;
 
     @Value("${app.cricket-sport-id:1}")
     private Long cricketSportId;
@@ -65,6 +74,15 @@ public class TeamService {
     @Value("${app.team.max-substitutes:4}")
     private int maxSubstitutes;
 
+    @Value("${app.player-pool.auto-refresh-window-minutes:180}")
+    private long playerPoolAutoRefreshWindowMinutes;
+
+    @Value("${app.player-pool.stale-refresh-min-seconds:120}")
+    private long playerPoolStaleRefreshMinSeconds;
+
+    @Value("${app.player-pool.announced-stale-refresh-min-seconds:45}")
+    private long playerPoolAnnouncedStaleRefreshMinSeconds;
+
     @Transactional
     public int syncFixturePlayerPool(Long fixtureId) {
         Fixture fixture = ensureFixtureReadyForPlayerSync(fixtureId);
@@ -75,6 +93,10 @@ public class TeamService {
         for (FixturePlayerPool existing : fixturePlayerPoolRepository.findByFixtureIdOrderByIdAsc(fixtureId)) {
             existingByPlayerId.put(existing.getPlayerId(), existing);
         }
+        boolean lineupWasAnnounced = existingByPlayerId.values().stream()
+                .anyMatch(existing -> Boolean.TRUE.equals(existing.getIsAnnounced()));
+        boolean lineupAnnouncedNow = seeds.stream()
+                .anyMatch(seed -> Boolean.TRUE.equals(seed.isAnnounced));
 
         int count = 0;
         Set<Long> syncedPlayerIds = new HashSet<>();
@@ -126,33 +148,33 @@ public class TeamService {
             fixturePlayerPoolRepository.save(existing);
         }
 
-        fixture.setLastSyncedAt(LocalDateTime.now());
-        fixtureRepository.save(fixture);
+        if (!lineupWasAnnounced && lineupAnnouncedNow) {
+            notifyFixtureUsersAboutLineupAnnouncement(fixture, participants);
+        }
 
         return count;
     }
 
     public List<FixturePlayerPoolResponse> getFixturePlayerPool(Long fixtureId) {
+        return getFixturePlayerPool(fixtureId, false);
+    }
+
+    public List<FixturePlayerPoolResponse> getFixturePlayerPool(Long fixtureId, boolean forceSync) {
         Fixture fixture = fixtureRepository.findById(fixtureId)
                 .orElseThrow(() -> ApiException.notFound("Fixture not found"));
 
-        List<FixturePlayerPool> pool = fixturePlayerPoolRepository
-                .findByFixtureIdAndIsActiveTrueOrderByExternalTeamIdAscRoleCodeAscIdAsc(fixtureId);
-
-        if (pool.isEmpty() && fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
+        List<FixturePlayerPool> pool = findActivePool(fixtureId);
+        if (shouldSyncPlayerPoolOnRead(fixture, pool, forceSync)) {
             try {
                 syncFixturePlayerPool(fixtureId);
             } catch (RuntimeException ex) {
                 log.warn(
-                        "Live player-pool sync failed for fixture {}. Falling back to the saved pool if present.",
+                        "Player-pool sync failed for fixture {}. Falling back to the saved pool if present.",
                         fixtureId,
                         ex
                 );
-                // Fall back to the last saved pool if live sync is not available yet.
             }
-
-            pool = fixturePlayerPoolRepository
-                    .findByFixtureIdAndIsActiveTrueOrderByExternalTeamIdAscRoleCodeAscIdAsc(fixtureId);
+            pool = findActivePool(fixtureId);
         }
 
         Map<Long, String> teamNameMap = new HashMap<>();
@@ -183,6 +205,8 @@ public class TeamService {
                     .playerName(player.getPlayerName())
                     .shortName(player.getShortName())
                     .roleCode(p.getRoleCode())
+                    .creditValue(p.getCreditValue())
+                    .selectionPercent(p.getSelectionPercent())
                     .isAnnounced(p.getIsAnnounced())
                     .isPlaying(p.getIsPlaying())
                     .imageUrl(player.getImageUrl())
@@ -190,6 +214,63 @@ public class TeamService {
         }
 
         return response;
+    }
+
+    private List<FixturePlayerPool> findActivePool(Long fixtureId) {
+        return fixturePlayerPoolRepository
+                .findByFixtureIdAndIsActiveTrueOrderByExternalTeamIdAscRoleCodeAscIdAsc(fixtureId);
+    }
+
+    private boolean shouldSyncPlayerPoolOnRead(Fixture fixture, List<FixturePlayerPool> pool, boolean forceSync) {
+        LocalDateTime now = LocalDateTime.now();
+        if (fixture.getDeadlineTime() == null || !fixture.getDeadlineTime().isAfter(now)) {
+            return false;
+        }
+
+        if (pool.isEmpty()) {
+            return true;
+        }
+
+        LocalDateTime lastPoolSyncAt = resolveLastPlayerPoolSyncAt(pool);
+        if (forceSync) {
+            return true;
+        }
+
+        boolean lineupAnnounced = pool.stream().anyMatch(player -> Boolean.TRUE.equals(player.getIsAnnounced()));
+        if (!lineupAnnounced && playerPoolAutoRefreshWindowMinutes > 0) {
+            LocalDateTime autoRefreshWindowStart = fixture.getDeadlineTime().minusMinutes(playerPoolAutoRefreshWindowMinutes);
+            if (now.isBefore(autoRefreshWindowStart)) {
+                return false;
+            }
+        }
+
+        long staleSeconds = lineupAnnounced
+                ? playerPoolAnnouncedStaleRefreshMinSeconds
+                : playerPoolStaleRefreshMinSeconds;
+        if (staleSeconds <= 0) {
+            return true;
+        }
+
+        if (lastPoolSyncAt == null) {
+            return true;
+        }
+
+        return lastPoolSyncAt.isBefore(now.minusSeconds(staleSeconds));
+    }
+
+    private LocalDateTime resolveLastPlayerPoolSyncAt(List<FixturePlayerPool> pool) {
+        LocalDateTime latest = null;
+        for (FixturePlayerPool playerPool : pool) {
+            LocalDateTime candidate = playerPool.getUpdatedAt();
+            if (candidate == null) {
+                candidate = playerPool.getCreatedAt();
+            }
+
+            if (candidate != null && (latest == null || candidate.isAfter(latest))) {
+                latest = candidate;
+            }
+        }
+        return latest;
     }
 
     private List<PlayerPoolSeed> loadPlayerPoolSeeds(Fixture fixture, List<FixtureParticipant> participants) {
@@ -274,9 +355,24 @@ public class TeamService {
             return squadData;
         }
 
+        JsonNode squadPlayers = squad.path("players");
+        if (squadPlayers.isArray()) {
+            return squadPlayers;
+        }
+
+        JsonNode squadPlayersData = squadPlayers.path("data");
+        if (squadPlayersData.isArray()) {
+            return squadPlayersData;
+        }
+
         JsonNode players = data.path("players");
         if (players.isArray()) {
             return players;
+        }
+
+        JsonNode playersData = players.path("data");
+        if (playersData.isArray()) {
+            return playersData;
         }
 
         return objectMapper.createArrayNode();
@@ -484,10 +580,13 @@ public class TeamService {
             return null;
         }
 
-        Long externalTeamId = longValue(playerNode, "lineup.team_id");
-        if (externalTeamId == null) {
-            externalTeamId = longValue(playerNode, "team_id");
-        }
+        Long externalTeamId = firstAvailableLong(
+                playerNode,
+                "lineup.team_id",
+                "lineup.team.id",
+                "team_id",
+                "team.id"
+        );
         if (externalTeamId == null) {
             externalTeamId = 0L;
         }
@@ -529,7 +628,7 @@ public class TeamService {
         Fixture fixture = fixtureRepository.findById(fixtureId)
                 .orElseThrow(() -> ApiException.notFound("Fixture not found"));
 
-        if (fixture.getDeadlineTime().isBefore(LocalDateTime.now())) {
+        if (fixture.getDeadlineTime() == null || !fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
             throw ApiException.conflict("Team creation is closed for this fixture");
         }
 
@@ -560,7 +659,12 @@ public class TeamService {
     }
 
     public List<TeamResponse> getMyTeams(Long userId, Long fixtureId) {
-        List<UserMatchTeam> teams = userMatchTeamRepository.findByFixtureIdAndUserIdOrderByCreatedAtDesc(fixtureId, userId);
+        Fixture fixture = fixtureRepository.findById(fixtureId)
+                .orElseThrow(() -> ApiException.notFound("Fixture not found"));
+        cleanupUnusedTeamsAfterStart(userId, fixture);
+
+        List<UserMatchTeam> teams = userMatchTeamRepository
+                .findByFixtureIdAndUserIdOrderByCreatedAtDesc(fixtureId, userId);
         List<TeamResponse> response = new ArrayList<>();
         for (UserMatchTeam t : teams) {
             lockAndApplyAutoSubstitutesIfNeeded(t.getId());
@@ -580,6 +684,84 @@ public class TeamService {
         return mapTeamResponse(team);
     }
 
+    private void cleanupUnusedTeamsAfterStart(Long userId, Fixture fixture) {
+        if (fixture.getDeadlineTime() == null || fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
+            return;
+        }
+
+        List<UserMatchTeam> teams = userMatchTeamRepository
+                .findByFixtureIdAndUserIdOrderByCreatedAtDesc(fixture.getId(), userId);
+
+        for (UserMatchTeam team : teams) {
+            if (contestEntryRepository.existsByUserMatchTeamId(team.getId())) {
+                continue;
+            }
+
+            userMatchTeamPlayerRepository.deleteByUserMatchTeamId(team.getId());
+            userMatchTeamPlayerRepository.flush();
+            userMatchTeamRepository.delete(team);
+        }
+    }
+
+    private void notifyFixtureUsersAboutLineupAnnouncement(
+            Fixture fixture,
+            List<FixtureParticipant> participants
+    ) {
+        List<UserMatchTeam> teams = userMatchTeamRepository.findByFixtureIdOrderByCreatedAtDesc(fixture.getId());
+        if (teams.isEmpty()) {
+            return;
+        }
+
+        String payloadJson = "{\"fixtureId\":" + fixture.getId() + ",\"type\":\"LINEUP_ANNOUNCED\"}";
+        String matchLabel = buildFixtureShortLabel(fixture, participants);
+        List<Notification> notifications = new ArrayList<>();
+        Set<Long> notifiedUserIds = new LinkedHashSet<>();
+
+        for (UserMatchTeam team : teams) {
+            if (!notifiedUserIds.add(team.getUserId())) {
+                continue;
+            }
+            if (notificationRepository.existsByUserIdAndTypeAndPayloadJson(
+                    team.getUserId(),
+                    LINEUP_ANNOUNCED_NOTIFICATION_TYPE,
+                    payloadJson
+            )) {
+                continue;
+            }
+
+            notifications.add(Notification.builder()
+                    .userId(team.getUserId())
+                    .type(LINEUP_ANNOUNCED_NOTIFICATION_TYPE)
+                    .title("Playing XI Announced")
+                    .body(matchLabel + " lineup is out. Refresh Live Team and review your team.")
+                    .payloadJson(payloadJson)
+                    .isRead(false)
+                    .build());
+        }
+
+        if (!notifications.isEmpty()) {
+            notificationService.createNotifications(notifications);
+        }
+    }
+
+    private String buildFixtureShortLabel(Fixture fixture, List<FixtureParticipant> participants) {
+        if (participants.size() >= 2) {
+            FixtureParticipant first = participants.get(0);
+            FixtureParticipant second = participants.get(1);
+            String firstShort = first.getShortName() != null && !first.getShortName().isBlank()
+                    ? first.getShortName()
+                    : first.getTeamName();
+            String secondShort = second.getShortName() != null && !second.getShortName().isBlank()
+                    ? second.getShortName()
+                    : second.getTeamName();
+            return firstShort + " vs " + secondShort;
+        }
+
+        return fixture.getTitle() == null || fixture.getTitle().isBlank()
+                ? "This match"
+                : fixture.getTitle();
+    }
+
     public TeamResponse getTeamById(Long teamId) {
         UserMatchTeam team = userMatchTeamRepository.findById(teamId)
                 .orElseThrow(() -> ApiException.notFound("Team not found"));
@@ -597,7 +779,9 @@ public class TeamService {
         Fixture fixture = fixtureRepository.findById(team.getFixtureId())
                 .orElseThrow(() -> ApiException.notFound("Fixture not found"));
 
-        if (Boolean.TRUE.equals(team.getIsLocked()) || fixture.getDeadlineTime().isBefore(LocalDateTime.now())) {
+        if (Boolean.TRUE.equals(team.getIsLocked())
+                || fixture.getDeadlineTime() == null
+                || !fixture.getDeadlineTime().isAfter(LocalDateTime.now())) {
             throw ApiException.conflict("Team can no longer be edited");
         }
 
@@ -629,11 +813,8 @@ public class TeamService {
         UserMatchTeam team = userMatchTeamRepository.findByIdAndUserId(teamId, userId)
                 .orElseThrow(() -> ApiException.notFound("Team not found"));
 
-        Fixture fixture = fixtureRepository.findById(team.getFixtureId())
-                .orElseThrow(() -> ApiException.notFound("Fixture not found"));
-
-        if (Boolean.TRUE.equals(team.getIsLocked()) || fixture.getDeadlineTime().isBefore(LocalDateTime.now())) {
-            throw ApiException.conflict("Team can no longer be deleted");
+        if (!canDeleteTeam(team)) {
+            throw ApiException.conflict("Joined teams cannot be deleted");
         }
 
         userMatchTeamPlayerRepository.deleteByUserMatchTeamId(team.getId());
@@ -783,12 +964,35 @@ public class TeamService {
     private TeamResponse mapTeamResponse(UserMatchTeam team) {
         List<UserMatchTeamPlayer> players = userMatchTeamPlayerRepository
                 .findByUserMatchTeamIdOrderByIsSubstituteAscSubstitutePriorityAscIdAsc(team.getId());
+        boolean canDelete = canDeleteTeam(team);
+
+        Map<Long, FixturePlayerPool> poolsById = new HashMap<>();
+        Set<Long> fixturePlayerPoolIds = new LinkedHashSet<>();
+        for (UserMatchTeamPlayer player : players) {
+            if (player.getFixturePlayerPoolId() != null) {
+                fixturePlayerPoolIds.add(player.getFixturePlayerPoolId());
+            }
+        }
+        for (FixturePlayerPool pool : fixturePlayerPoolRepository.findAllById(fixturePlayerPoolIds)) {
+            poolsById.put(pool.getId(), pool);
+        }
+
+        Map<Long, String> teamNameByExternalId = new HashMap<>();
+        for (FixtureParticipant participant : fixtureParticipantRepository
+                .findByFixtureIdOrderByIsHomeDescTeamNameAsc(team.getFixtureId())) {
+            teamNameByExternalId.put(participant.getExternalTeamId(), participant.getTeamName());
+        }
 
         List<TeamPlayerResponse> playerResponses = new ArrayList<>();
         List<TeamPlayerResponse> substituteResponses = new ArrayList<>();
         for (UserMatchTeamPlayer p : players) {
             Player player = playerRepository.findById(p.getPlayerId())
                     .orElseThrow(() -> ApiException.notFound("Player not found"));
+            FixturePlayerPool pool = poolsById.get(p.getFixturePlayerPoolId());
+            String teamName = "Team";
+            if (pool != null && pool.getExternalTeamId() != null) {
+                teamName = teamNameByExternalId.getOrDefault(pool.getExternalTeamId(), "Team");
+            }
 
             TeamPlayerResponse response = TeamPlayerResponse.builder()
                     .fixturePlayerPoolId(p.getFixturePlayerPoolId())
@@ -796,6 +1000,9 @@ public class TeamService {
                     .playerName(player.getPlayerName())
                     .roleCode(p.getRoleCode())
                     .teamSide(p.getTeamSide())
+                    .teamName(teamName)
+                    .creditValue(p.getCreditValue())
+                    .imageUrl(player.getImageUrl())
                     .isCaptain(p.getIsCaptain())
                     .isViceCaptain(p.getIsViceCaptain())
                     .isSubstitute(p.getIsSubstitute())
@@ -816,28 +1023,79 @@ public class TeamService {
                 .captainPlayerId(team.getCaptainPlayerId())
                 .viceCaptainPlayerId(team.getViceCaptainPlayerId())
                 .isLocked(team.getIsLocked())
+                .canDelete(canDelete)
                 .players(playerResponses)
                 .substitutes(substituteResponses)
                 .build();
     }
 
+    private boolean canDeleteTeam(UserMatchTeam team) {
+        return !contestEntryRepository.existsByUserMatchTeamId(team.getId());
+    }
+
     private String resolveRoleCode(JsonNode playerNode) {
-        String position = textValue(playerNode, "position.name", null);
-        if (position != null) {
-            String p = position.toUpperCase();
-            if (p.contains("WICKET")) return "WK";
-            if (p.contains("BAT")) return "BAT";
-            if (p.contains("BOWL")) return "BOWL";
-            if (p.contains("ALL")) return "AR";
+        Integer positionId = firstAvailableInt(playerNode, "position.id", "lineup.position.id");
+        if (positionId != null) {
+            return switch (positionId) {
+                case 1 -> "BAT";
+                case 2 -> "BOWL";
+                case 3 -> "WK";
+                case 4 -> "AR";
+                default -> resolveRoleCodeFromName(
+                        firstAvailableText(playerNode, "position.name", "lineup.position.name")
+                );
+            };
         }
 
         boolean wicketKeeper = booleanValue(playerNode, "lineup.wicketkeeper");
-        boolean captain = booleanValue(playerNode, "lineup.captain");
+        if (wicketKeeper) {
+            return "WK";
+        }
 
-        if (wicketKeeper) return "WK";
-        if (captain) return "BAT";
+        String namedRole = resolveRoleCodeFromName(
+                firstAvailableText(playerNode, "position.name", "lineup.position.name", "position")
+        );
+        if (namedRole != null) {
+            return namedRole;
+        }
 
-        return "AR";
+        String battingStyle = firstAvailableText(playerNode, "battingstyle", "batting_style");
+        String bowlingStyle = firstAvailableText(playerNode, "bowlingstyle", "bowling_style");
+        boolean hasBattingStyle = battingStyle != null && !battingStyle.isBlank();
+        boolean hasBowlingStyle = bowlingStyle != null && !bowlingStyle.isBlank();
+
+        if (hasBattingStyle && hasBowlingStyle) {
+            return "AR";
+        }
+        if (hasBowlingStyle) {
+            return "BOWL";
+        }
+        if (hasBattingStyle) {
+            return "BAT";
+        }
+
+        return "BAT";
+    }
+
+    private String resolveRoleCodeFromName(String positionName) {
+        if (positionName == null || positionName.isBlank()) {
+            return null;
+        }
+
+        String normalized = positionName.trim().toUpperCase(Locale.ROOT).replace('-', ' ');
+        if (normalized.contains("WICKET")) {
+            return "WK";
+        }
+        if (normalized.contains("ALL")) {
+            return "AR";
+        }
+        if (normalized.contains("BOWL")) {
+            return "BOWL";
+        }
+        if (normalized.contains("BAT")) {
+            return "BAT";
+        }
+        return null;
     }
 
     private String textValue(JsonNode node, String path, String fallback) {
@@ -856,6 +1114,55 @@ public class TeamService {
             current = current.path(part);
         }
         return current.isMissingNode() || current.isNull() ? null : current.asLong();
+    }
+
+    private Integer intValue(JsonNode node, String path) {
+        JsonNode current = node;
+        String[] parts = path.split("\\.");
+        for (String part : parts) {
+            current = current.path(part);
+        }
+        if (current.isMissingNode() || current.isNull()) {
+            return null;
+        }
+        if (current.canConvertToInt()) {
+            return current.asInt();
+        }
+        try {
+            return Integer.parseInt(current.asText());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private Long firstAvailableLong(JsonNode node, String... paths) {
+        for (String path : paths) {
+            Long value = longValue(node, path);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Integer firstAvailableInt(JsonNode node, String... paths) {
+        for (String path : paths) {
+            Integer value = intValue(node, path);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String firstAvailableText(JsonNode node, String... paths) {
+        for (String path : paths) {
+            String value = textValue(node, path, null);
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private boolean booleanValue(JsonNode node, String path) {

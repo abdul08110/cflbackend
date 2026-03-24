@@ -14,6 +14,7 @@ public class TeamResponse {
     private Long captainPlayerId;
     private Long viceCaptainPlayerId;
     private Boolean isLocked;
+    private Boolean canDelete;
     private List<TeamPlayerResponse> players;
     private List<TeamPlayerResponse> substitutes;
 }

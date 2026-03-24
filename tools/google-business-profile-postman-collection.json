@@ -1,0 +1,169 @@
+{
+  "info": {
+    "_postman_id": "4ad89f4d-7c89-4c62-b67f-4d2d2b1ff201",
+    "name": "Google Business Profile Bulk Export",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "account_id",
+      "value": ""
+    },
+    {
+      "key": "location_id",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. List Accounts",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://mybusinessaccountmanagement.googleapis.com/v1/accounts",
+          "protocol": "https",
+          "host": [
+            "mybusinessaccountmanagement",
+            "googleapis",
+            "com"
+          ],
+          "path": [
+            "v1",
+            "accounts"
+          ]
+        },
+        "description": "Lists the Google Business Profile accounts you can access. In Tests, this stores the first account ID into {{account_id}}."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const data = pm.response.json();",
+              "const accounts = data.accounts || [];",
+              "pm.test('Accounts returned', () => pm.expect(accounts.length).to.be.above(0));",
+              "if (accounts.length > 0) {",
+              "  const accountName = accounts[0].name || '';",
+              "  const accountId = accountName.split('/').pop();",
+              "  pm.collectionVariables.set('account_id', accountId);",
+              "  console.log('account_id', accountId);",
+              "  console.log('accounts', accounts.map(a => ({ name: a.name, accountName: a.accountName, type: a.type })));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. List Locations",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://mybusiness.googleapis.com/v4/accounts/{{account_id}}/locations?pageSize=100",
+          "protocol": "https",
+          "host": [
+            "mybusiness",
+            "googleapis",
+            "com"
+          ],
+          "path": [
+            "v4",
+            "accounts",
+            "{{account_id}}",
+            "locations"
+          ],
+          "query": [
+            {
+              "key": "pageSize",
+              "value": "100"
+            }
+          ]
+        },
+        "description": "Lists locations for the selected account. The numeric business_profile_id is the last segment of location.name. storeCode is returned directly."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const data = pm.response.json();",
+              "const locations = data.locations || [];",
+              "pm.test('Locations returned', () => pm.expect(locations.length).to.be.above(0));",
+              "const rows = locations.map(loc => {",
+              "  const name = loc.name || '';",
+              "  const businessProfileId = name.split('/').pop();",
+              "  return {",
+              "    accountId: pm.collectionVariables.get('account_id') || '',",
+              "    locationName: name,",
+              "    locationId: businessProfileId,",
+              "    business_profile_id: businessProfileId,",
+              "    storeCode: loc.storeCode || '',",
+              "    title: loc.locationName || ''",
+              "  };",
+              "});",
+              "console.log('locations_rows', rows);",
+              "console.log('nextPageToken', data.nextPageToken || '');",
+              "pm.collectionVariables.set('locations_next_page_token', data.nextPageToken || '');"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Review Summary For One Location",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://mybusiness.googleapis.com/v4/accounts/{{account_id}}/locations/{{location_id}}/reviews?pageSize=1",
+          "protocol": "https",
+          "host": [
+            "mybusiness",
+            "googleapis",
+            "com"
+          ],
+          "path": [
+            "v4",
+            "accounts",
+            "{{account_id}}",
+            "locations",
+            "{{location_id}}",
+            "reviews"
+          ],
+          "query": [
+            {
+              "key": "pageSize",
+              "value": "1"
+            }
+          ]
+        },
+        "description": "Returns averageRating and totalReviewCount for one location. Use this request in the Collection Runner with a data file built from the List Locations response."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const data = pm.response.json();",
+              "const row = {",
+              "  storeCode: pm.iterationData.get('storeCode') || pm.collectionVariables.get('storeCode') || '',",
+              "  business_profile_id: pm.iterationData.get('locationId') || pm.collectionVariables.get('location_id') || '',",
+              "  rating: data.averageRating || '',",
+              "  total_review_count: data.totalReviewCount || 0",
+              "};",
+              "console.log('review_summary_row', row);"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "oauth2"
+  }
+}
